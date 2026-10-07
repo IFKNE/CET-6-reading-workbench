@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="本地运行的六级英语精读工作台" />
+    <title>六级精读工作台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="brand" href="#paste-view" aria-label="返回文章输入页"><span>R</span>eading <i>room</i></a>
+      <div class="header-meta">CET–6 · 精读工作台</div>
+      <nav class="header-actions" aria-label="主要导航"><button class="nav-button" type="button" data-view="paste">开始精读</button><button id="open-library" class="nav-button" type="button" data-view="library">我的精读</button><button id="open-wordbook" class="nav-button" type="button" data-view="wordbook">单词本 <span id="wordbook-count">0</span></button><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换为暗色模式">◐ <span>夜读</span></button></nav>
+    </header>
+
+    <main>
+      <section id="paste-view" class="hero-shell" aria-labelledby="hero-title">
+        <p class="eyebrow">SLOW READING, DEEP LEARNING</p>
+        <h1 id="hero-title">把一篇文章，<br /><em>读成自己的语言。</em></h1>
+        <p class="hero-copy">粘贴六级阅读原文。点击每个单词、选中短语或句子、翻译整段，并把真正值得记住的词收入单词本。</p>
+        <label class="article-label" for="article-input">英文文章</label>
+        <textarea id="article-input" rows="12" placeholder="将英文文章粘贴在这里…\n\n保留空行即可自动分段。"></textarea>
+        <div class="article-options">
+          <label for="article-category">文章分类</label>
+          <select id="article-category"><option>短篇阅读</option><option>长篇阅读</option><option>听力原文</option><option value="custom">自定义分类…</option></select>
+          <input id="custom-category" type="text" placeholder="输入自定义分类" hidden />
+          <label for="article-folder">存入文件夹</label>
+          <select id="article-folder"><option value="">未归档</option></select>
+        </div>
+        <div class="paste-actions">
+          <button id="open-reader" class="primary-button" type="button">开始精读 <span>→</span></button>
+          <button id="demo-article" class="quiet-button" type="button">载入一段示例</button>
+        </div>
+        <p id="paste-error" class="form-message" role="alert"></p>
+        <section id="article-library" class="article-library" aria-label="我的精读文章">
+          <div class="library-heading"><p class="eyebrow">MY READINGS</p><h2>我的精读</h2></div>
+          <div class="folder-create-row"><input id="new-folder-name" type="text" maxlength="24" placeholder="新建文件夹，例如：长篇阅读" aria-label="新建精读文件夹" /><button id="create-folder" class="quiet-button" type="button">新建文件夹 ＋</button></div>
+          <div id="folder-shelf" class="folder-shelf" aria-label="精读文件夹"></div>
+          <div id="article-library-list" class="article-library-list"><p class="book-empty">还没有保存的精读文章。</p></div>
+        </section>
+      </section>
+
+      <section id="reader-view" hidden aria-label="文章精读">
+        <div class="reader-toolbar">
+          <button id="back-to-paste" class="text-button back-button" type="button">← 更换文章</button>
+          <p id="reader-status" aria-live="polite">点击单词开始批注</p>
+          <div class="toolbar-actions">
+            <button id="show-article-translation" class="text-button" type="button" disabled>全文译文</button>
+            <button id="save-article" class="text-button" type="button">保存精读</button>
+            <button id="clear-article" class="text-button" type="button">清空本篇</button>
+          </div>
+        </div>
+        <section class="key-vocabulary-wrap"><div class="library-heading"><p class="eyebrow">CET–6 KEY WORDS</p><h2>本篇重点词</h2></div><div id="key-vocabulary" class="key-vocabulary"><p class="book-empty">正在准备本篇重点词…</p></div></section>
+        <div class="reading-layout">
+          <article class="book-shell" aria-label="英文原文">
+            <header class="book-page-header"><span id="reading-category" class="reading-category">短篇阅读</span><span id="reading-progress">0 段精读</span></header>
+            <div class="book-title-block"><p class="eyebrow">CET–6 READING SESSION</p><h1 id="reading-book-title">未命名精读文章</h1></div>
+            <div id="reader-content" class="reader-paper"></div>
+            <footer class="book-page-footer"><span>Reading Room · CET–6</span><span id="reading-page-number">01</span></footer>
+          </article>
+          <aside id="annotation-panel" class="annotation-panel" aria-live="polite">
+            <div class="annotation-empty">
+              <span class="annotation-mark">✦</span>
+              <p>点击一个单词，或选中一段文字。</p>
+              <small>释义、翻译与学习笔记会显示在这里。</small>
+            </div>
+          </aside>
+        </div>
+        <div id="selection-actions" class="selection-actions" hidden>
+          <span id="selection-preview"></span>
+          <button id="translate-selection" type="button">翻译选中内容</button>
+          <button id="save-selection-phrase" type="button">收录短语</button>
+        </div>
+      </section>
+      <section id="library-view" class="workspace-page" hidden aria-label="我的精读"><div id="library-mount"></div></section>
+      <section id="wordbook-view" class="workspace-page" hidden aria-label="我的单词本"></section>
+      <section id="word-detail-view" class="workspace-page" hidden aria-label="单词详情"><div id="word-detail-content"></div></section>
+    </main>
+
+    <div id="word-context-menu" class="word-context-menu" hidden role="menu" aria-label="单词操作菜单">
+      <p id="context-menu-word"></p>
+      <button type="button" data-action="highlight" role="menuitem">高亮</button>
+      <button type="button" data-action="translate" role="menuitem">翻译</button>
+      <button type="button" data-action="save" role="menuitem">加入单词本</button>
+      <button type="button" data-action="question" role="menuitem">问 AI</button>
+    </div>
+    <section id="question-modal" class="question-modal" hidden aria-label="基于全文问 AI" aria-modal="true" role="dialog">
+      <form id="article-question-form" class="question-card">
+        <button id="close-question" class="icon-button question-close" type="button" aria-label="关闭提问框">×</button>
+        <p class="eyebrow">ASK THE WHOLE ARTICLE</p>
+        <h2>基于全文，问 AI</h2>
+        <p>AI 会结合整篇文章回答，不只解释当前单词。</p>
+        <label for="article-question">你的问题</label>
+        <textarea id="article-question" rows="4" placeholder="例如：作者第二段如何支持自己的观点？"></textarea>
+        <button class="primary-button" type="submit">提问 <span>→</span></button>
+      </form>
+    </section>
+
+    <aside id="wordbook-drawer" class="wordbook-drawer" hidden aria-label="我的单词本">
+      <div class="drawer-topline">
+        <p class="eyebrow">MY WORDS</p>
+        <button id="close-wordbook" class="icon-button" type="button" aria-label="关闭单词本">×</button>
+      </div>
+      <h2>单词本 <span id="drawer-count">0</span></h2>
+      <div id="word-quick-filters" class="word-quick-filters" aria-label="词汇快捷筛选">
+        <button type="button" data-status="">全部</button><button type="button" data-status="unknown">不会</button><button type="button" data-status="fuzzy">模糊</button><button type="button" data-status="known">认识</button><button type="button" data-tag="高频">高频</button><button type="button" data-tag="易混">易混</button><button type="button" data-tag="学术词">学术词</button>
+      </div>
+      <div class="wordbook-filters"><input id="word-search" type="search" placeholder="搜索单词、释义或来源文章" /><select id="word-source-filter"><option value="">全部来源文章</option></select></div>
+      <div id="wordbook-list" class="wordbook-list"></div>
+      <button id="export-wordbook" class="primary-button export-button" type="button">导出为 Markdown <span>↓</span></button>
+      <button id="export-wordbook-docx" class="quiet-button export-button" type="button">导出为 Word <span>↓</span></button>
+    </aside>
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>

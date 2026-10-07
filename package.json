@@ -1,0 +1,18 @@
+{
+  "name": "cet6-reading-workbench",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "docx": "^9.8.1",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.3.1"
+  }
+}
