@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, getWordContextSentence } from '../public/js/wordbook.js';
+import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, getWordContextSentence, isWordSaved, savedWordKeys } from '../public/js/wordbook.js';
 
 test('同一词形更新而不是重复收藏', () => {
   const first = addOrUpdateWord([], { word: 'study', meaning: '学习', partOfSpeech: 'v.', context: 'I study every day.', savedAt: '2026-10-05' });
@@ -56,4 +56,20 @@ test('单词列表摘要只保留常用释义和短语，不保留整段上下�
   assert.equal(summary.meaning, 'adj. · 关键的');
   assert.equal(summary.phrase, 'critical thinking · 批判性思维');
   assert.equal(summary.example, 'Critical reading matters.');
+});
+
+test('按小写词形判断单词是否已收录', () => {
+  const entries = [{ word: 'critical' }, { word: 'evidence' }];
+  assert.equal(isWordSaved(entries, 'Critical'), true);
+  assert.equal(isWordSaved(entries, 'critical'), true);
+  assert.equal(isWordSaved(entries, 'judgment'), false);
+  assert.equal(isWordSaved([], 'critical'), false);
+  assert.equal(isWordSaved(null, 'critical'), false);
+});
+
+test('已收录词形集合可一次性标记重点词卡片', () => {
+  const keys = savedWordKeys([{ word: 'Critical' }, { word: 'Evidence' }, { word: '' }, {}]);
+  assert.equal(keys.has('critical'), true);
+  assert.equal(keys.has('evidence'), true);
+  assert.equal(keys.size, 2);
 });

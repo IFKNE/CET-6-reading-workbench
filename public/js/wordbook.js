@@ -13,6 +13,20 @@ export function addOrUpdateWord(entries, entry) {
   return [{ ...existing, ...entry, word: key, sources }, ...next];
 }
 
+export function savedWordKeys(entries) {
+  const keys = new Set();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const key = String(entry?.word ?? '').trim().toLowerCase();
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+export function isWordSaved(entries, word) {
+  const key = String(word ?? '').trim().toLowerCase();
+  return Boolean(key) && savedWordKeys(entries).has(key);
+}
+
 export function createMarkdown(entries, exportedAt) {
   const rows = ['# 六级精读单词本', '', `导出日期：${exportedAt}`, ''];
   for (const item of entries) {
