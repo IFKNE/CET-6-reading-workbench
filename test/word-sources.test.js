@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clearSelection, selectAll, toggleArticle, toggleFolder, toggleUnfiled, toggleUnlinked } from '../public/js/word-sources.js';
+import { clearSelection, createSourceTree, selectAll, toggleArticle, toggleFolder, toggleUnfiled, toggleUnlinked } from '../public/js/word-sources.js';
 
 const tree = {
   folders: [
@@ -54,4 +54,41 @@ test('取消最后一个选择回到全部单词', () => {
 
 test('清空选择等于回到全部单词', () => {
   assert.deepEqual(clearSelection(), selectAll());
+});
+
+const entries = [
+  { word: 'critical', sources: { a1: { title: '对话一', count: 2 }, a3: { title: '长篇一', count: 1 } } },
+  { word: 'evidence', sources: { a1: { title: '对话一', count: 1 } } },
+  { word: 'judgment', sources: { a9: { title: '未归档文章', count: 1 } } },
+  { word: 'phrase one', entryType: 'phrase' },
+  { word: 'gone', sources: { a404: { title: '已删除的文章', count: 1 } } }
+];
+const articles = [
+  { id: 'a1', title: '对话一', folderId: 'f1' },
+  { id: 'a2', title: '对话二', folderId: 'f1' },
+  { id: 'a3', title: '长篇一', folderId: '' },
+  { id: 'a9', title: '未归档文章', folderId: '' }
+];
+const folders = [{ id: 'f1', name: '听力文件夹' }, { id: 'f2', name: '空文件夹' }];
+
+test('来源树按文件夹聚合并给出各层单词数', () => {
+  const sourceTree = createSourceTree(entries, articles, folders);
+  assert.deepEqual(sourceTree.folders.map((folder) => folder.id), ['f1']);
+  assert.deepEqual(sourceTree.folders[0].articleIds, ['a1']);
+  assert.equal(sourceTree.folders[0].count, 2);
+  assert.deepEqual(sourceTree.unfiled.articleIds.sort(), ['a3', 'a404', 'a9']);
+  assert.equal(sourceTree.unfiled.count, 3);
+  assert.equal(sourceTree.unlinked.count, 1);
+  assert.equal(sourceTree.total, 5);
+});
+
+test('文章不在精读库里时按条目里保存的标题落到未归档', () => {
+  const sourceTree = createSourceTree(entries, articles, folders);
+  const gone = sourceTree.unfiled.articles.find((article) => article.id === 'a404');
+  assert.equal(gone.title, '已删除的文章');
+});
+
+test('没有单词的文件夹不出现', () => {
+  const sourceTree = createSourceTree(entries, articles, folders);
+  assert.equal(sourceTree.folders.some((folder) => folder.id === 'f2'), false);
 });
