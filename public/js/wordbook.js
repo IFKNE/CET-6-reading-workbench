@@ -49,15 +49,14 @@ export function createMarkdown(entries, exportedAt) {
   return rows.join('\n');
 }
 
-export function filterWords(entries, { query = '', sourceId = '', status = '', tag = '' } = {}) {
+export function filterWords(entries, { query = '', status = '', tag = '' } = {}) {
   const keyword = query.trim().toLowerCase();
   return entries.filter((entry) => {
     const sources = entry.sources ?? {};
-    const sourceMatches = !sourceId || Boolean(sources[sourceId]);
     const searchable = [entry.word, entry.meaning, ...Object.values(sources).map((source) => source.title)].join(' ').toLowerCase();
     const statusMatches = !status || (entry.learningStatus ?? 'unknown') === status;
     const tagMatches = !tag || (entry.importanceTags ?? []).includes(tag);
-    return sourceMatches && statusMatches && tagMatches && (!keyword || searchable.includes(keyword));
+    return statusMatches && tagMatches && (!keyword || searchable.includes(keyword));
   });
 }
 

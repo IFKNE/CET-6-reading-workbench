@@ -31,10 +31,15 @@ test('同一单词合并文章来源并保留每篇出现次数', () => {
   assert.equal(updated[0].sources['article-2'].count, 1);
 });
 
-test('单词本可按搜索词和来源文章筛选', () => {
-  const entries = [{ word: 'critical', meaning: '关键的', sources: { a1: { title: '批判性阅读', count: 2 } } }, { word: 'evidence', meaning: '证据', sources: {} }];
-  assert.deepEqual(filterWords(entries, { query: '批判', sourceId: '' }).map((item) => item.word), ['critical']);
-  assert.deepEqual(filterWords(entries, { query: '', sourceId: 'a1' }).map((item) => item.word), ['critical']);
+test('单词本搜索词仍会匹配来源文章标题', () => {
+  const entries = [{ word: 'critical', meaning: '关键的', sources: { a1: { title: '批判性阅读', count: 2 } } }, { word: 'evidence', meaning: '证据' }];
+  assert.deepEqual(filterWords(entries, { query: '批判' }).map((item) => item.word), ['critical']);
+  assert.deepEqual(filterWords(entries, { query: '证据' }).map((item) => item.word), ['evidence']);
+});
+
+test('来源筛选不再由 filterWords 负责', () => {
+  const entries = [{ word: 'critical', sources: { a1: { title: '批判性阅读' } } }, { word: 'evidence', sources: {} }];
+  assert.deepEqual(filterWords(entries, { sourceId: 'a1' }).map((item) => item.word), ['critical', 'evidence']);
 });
 
 test('单词本可按掌握状态筛选', () => {
