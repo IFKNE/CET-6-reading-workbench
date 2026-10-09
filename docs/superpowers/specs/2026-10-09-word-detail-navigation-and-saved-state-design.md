@@ -40,7 +40,9 @@
 
 无来源时的兜底保持现有行为：`hasArticle ? 'reader' : 'paste'`，文案对应「← 返回原文 / ← 返回文章输入」。
 
-`switchView(view)` 记录 `state.viewOrigin = 进入前的视图`；顶部导航高亮跟随来源所属分区，因此从原文进详情页时不再点亮「单词本」。单词本右上角 × 也改用 `resolveViewBack`。
+`switchView(view)` 记录 `state.viewOrigin = 进入前的视图`；**进出详情页都不覆盖它**（`previousView !== 'word-detail' && view !== 'word-detail'`），否则「我的精读 → 单词本 → 详情 → 返回单词本 → ×」会把来源覆盖成 `wordbook` 而落到兜底页；详情页自己的来源记在 `state.detailOrigin`。顶部导航高亮跟随来源所属分区，因此从原文进详情页时不再点亮「单词本」。单词本右上角 × 也改用 `resolveViewBack`。
+
+表中 `wordbook → word-detail` 一行是防御性配置：当前路径下进出详情页都不记录来源，所以它实际不可达（`test/view-nav.test.js` 仍锁定该行为）。
 
 ### 3. 滚动位置
 
@@ -54,11 +56,12 @@
 
 ### 5. 已收录标识与动画
 
-- `public/js/wordbook.js` 新增 `isWordSaved(entries, word)` 与 `savedWordKeys(entries)`，按小写词形比对，与 `addOrUpdateWord` 的键规则一致。
+- `public/js/wordbook.js` 新增 `wordKey(value)` 作为**词形归一化的唯一入口**（`trim().toLowerCase()`），`savedWordKeys` / `isWordSaved` / `resolveStoredWordForm` 与 `app.js` 的 `normalizeWord`、`openWordDetail`、`renderWordDetail`、`updateWordEntry`、`enrichWordEntry`、`refreshSavedWordUi` 全部走它。历史遗留的带空白/大写词条因此仍能打开详情页。
+- 生成详细档案时 `enrichWordEntry` 必须把 `word: wordKey(entry.word)` 写在 `...result.data` **之后**，否则 AI 回包里的「原词」会改写条目词形，详情页当场显示「没有找到这个单词」。
 - 面板按钮：`.save-word.is-saving`（按压 + 涟漪）→ `.save-word.is-saved`（✓ 与一次 pop）。
 - 本篇重点词卡片：`.key-word-card.is-saved` 与 `.key-word-card-check` 徽标（scale-in 一次），配色与未收录区分。
 - 加入成功后统一 `refreshSavedWordUi()`：重渲染面板、重点词卡片、单词本列表，并写状态栏文案。
-- 动画只在「未收录 → 已收录」的真实转变时播放；已收录的词重复触发不播放、不重复写入。
+- 动画只在「未收录 → 已收录」的真实转变时播放；已收录的词重复触发不会重复插入条目（仍会更新该条目），但不再播放动画。
 - 所有动画在 `@media (prefers-reduced-motion: reduce)` 下退化为纯状态变化，沿用 `.archive-spinner` 的现有做法。
 
 ### 6. 详情页
