@@ -6,6 +6,7 @@ import { createArticleRecord, countWordInArticle, dedupeArticles, restoreArticle
 import { createFolder, deleteArticle, deleteFolder, getArticle, listArticles, listFolders, saveArticle } from './article-library.js';
 import { nextTheme, readTheme } from './theme.js';
 import { resolveViewBack } from './view-nav.js';
+import { clearSelection, createSourceTree, describeSelection, filterEntriesBySource, groupCheckState, selectAll, toggleArticle, toggleFolder, toggleUnfiled, toggleUnlinked } from './word-sources.js';
 import { createRequestLock } from './request-lock.js';
 import { PRESTUDY_TRANSLATION_VERSION, normalizePrestudyTranslation } from './prestudy.js';
 
@@ -56,7 +57,11 @@ const elements = {
   drawerBackdrop: document.querySelector('#drawer-backdrop'),
   wordbookList: document.querySelector('#wordbook-list'),
   wordSearch: document.querySelector('#word-search'),
-  wordSourceFilter: document.querySelector('#word-source-filter'),
+  sourceTrigger: document.querySelector('#word-source-trigger'),
+  sourceLabel: document.querySelector('#word-source-label'),
+  sourceDetail: document.querySelector('#word-source-detail'),
+  sourceClear: document.querySelector('#word-source-clear'),
+  sourcePanel: document.querySelector('#word-source-panel'),
   wordQuickFilters: document.querySelector('#word-quick-filters'),
   wordbookCount: document.querySelector('#wordbook-count'),
   drawerCount: document.querySelector('#drawer-count'),
@@ -81,6 +86,10 @@ const state = {
   folderId: '',
   libraryFolderId: 'all',
   libraryRenderId: 0,
+  libraryIndex: { articles: [], folders: [] },
+  sourceSelection: selectAll(),
+  sourceBrowse: { level: 'root', folderId: '' },
+  sourceFocusKey: '',
   notes: {},
   expandedTranslations: new Set(),
   expandedNotes: new Set(),
@@ -180,7 +189,10 @@ function switchView(view) {
   const highlightView = view === 'word-detail' ? (state.detailOrigin === 'wordbook' ? 'wordbook' : '') : view;
   document.querySelectorAll('[data-view]').forEach((button) => button.classList.toggle('is-active', button.dataset.view === highlightView));
   if (view === 'library') renderArticleLibrary();
-  if (view === 'wordbook') renderWordbook();
+  if (view === 'wordbook') {
+    renderWordbook();
+    renderArticleLibrary();
+  }
   if (view === 'word-detail') renderWordDetail();
   if (view !== previousView) {
     window.requestAnimationFrame(() => window.scrollTo(0, state.scrollMemory[view] ?? 0));
@@ -319,6 +331,13 @@ async function renderArticleLibrary() {
   try {
     const [storedArticles, folders] = await Promise.all([listArticles(), listFolders()]);
     if (renderId !== state.libraryRenderId) return;
+    // 单词本按文件夹归类要用到这份索引，这里已有现成结果，顺手缓存。
+    state.libraryIndex = {
+      articles: storedArticles.map((article) => ({ id: article.id, title: article.title, folderId: article.folderId || '' })),
+      folders: folders.map((folder) => ({ id: folder.id, name: folder.name }))
+    };
+    // 索引变了就同步单词本（含空文章库、删除文件夹、改文章文件夹等所有分支）。
+    if (state.view === 'wordbook') renderWordbook();
     const articles = dedupeArticles(storedArticles);
     renderFolderOptions(folders);
     renderFolderShelf(folders);
@@ -859,20 +878,123 @@ function leaveWordDetail(targetView) {
   refreshSavedWordUi(word, { animate: false });
 }
 
+function renderSourceFilter(tree = createSourceTree(state.entries, state.libraryIndex.articles, state.libraryIndex.folders)) {
+  const described = describeSelection(state.sourceSelection, tree, state.entries);
+  elements.sourceLabel.textContent = `来源：${described.label}`;
+  elements.sourceDetail.textContent = described.detail;
+  elements.sourceTrigger.classList.toggle('is-filtered', described.active);
+  elements.sourceClear.hidden = !described.active;
+  if (!elements.sourcePanel.hidden) renderSourcePanel(tree);
+}
+
+function renderSourcePanel(tree = createSourceTree(state.entries, state.libraryIndex.articles, state.libraryIndex.folders)) {
+  const fragments = [];
+  const addRow = (key, label, count, checked, onChange, enter) => {
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = checked !== 'none';
+    input.indeterminate = checked === 'some';
+    input.dataset.focusKey = key;
+    input.addEventListener('change', onChange);
+    const row = createElement('li', 'source-row', [createElement('label', '', [input, createElement('span', '', label)]), createElement('span', 'source-row-count', `${count} 词`)]);
+    if (enter) {
+      const button = createElement('button', 'source-enter', '›');
+      button.type = 'button';
+      button.setAttribute('aria-label', `进入 ${label}`);
+      button.addEventListener('click', enter);
+      row.append(button);
+    }
+    fragments.push(row);
+  };
+
+  if (state.sourceBrowse.level === 'root') {
+    const everything = document.createElement('input');
+    everything.type = 'checkbox';
+    everything.checked = state.sourceSelection.all;
+    everything.dataset.focusKey = 'all';
+    everything.addEventListener('change', () => applySourceSelection(selectAll(), 'all'));
+    fragments.push(createElement('li', 'source-row', [createElement('label', '', [everything, createElement('span', '', '全部单词')]), createElement('span', 'source-row-count', `${tree.total} 词`)]));
+    tree.folders.forEach((folder) => {
+      addRow(`folder:${folder.id}`, folder.name, folder.count, groupCheckState(folder.articleIds, state.sourceSelection), () => applySourceSelection(toggleFolder(state.sourceSelection, tree, folder.id), `folder:${folder.id}`), () => { state.sourceBrowse = { level: 'folder', folderId: folder.id }; state.sourceFocusKey = 'back'; renderSourcePanel(tree); });
+    });
+    if (tree.unfiled.articleIds.length) {
+      addRow('unfiled', '未归档', tree.unfiled.count, groupCheckState(tree.unfiled.articleIds, state.sourceSelection), () => applySourceSelection(toggleUnfiled(state.sourceSelection, tree), 'unfiled'), () => { state.sourceBrowse = { level: 'unfiled', folderId: '' }; state.sourceFocusKey = 'back'; renderSourcePanel(tree); });
+    }
+    if (tree.unlinked.count) {
+      addRow('unlinked', '未关联文章', tree.unlinked.count, state.sourceSelection.includeUnlinked ? 'all' : 'none', () => applySourceSelection(toggleUnlinked(state.sourceSelection), 'unlinked'));
+    }
+  } else {
+    const isUnfiled = state.sourceBrowse.level === 'unfiled';
+    const folder = tree.folders.find((item) => item.id === state.sourceBrowse.folderId);
+    const group = isUnfiled ? tree.unfiled : folder ?? { articleIds: [], articles: [], count: 0, name: '' };
+    const back = createElement('button', 'source-enter', '← 全部来源');
+    back.type = 'button';
+    back.dataset.focusKey = 'back';
+    back.addEventListener('click', () => { state.sourceBrowse = { level: 'root', folderId: '' }; state.sourceFocusKey = 'back'; renderSourcePanel(tree); });
+    const groupToggle = createElement('button', 'text-button source-group-toggle', groupCheckState(group.articleIds, state.sourceSelection) === 'all' ? '本文件夹全不选' : '本文件夹全选');
+    groupToggle.type = 'button';
+    groupToggle.dataset.focusKey = 'group';
+    groupToggle.addEventListener('click', () => applySourceSelection(
+      isUnfiled ? toggleUnfiled(state.sourceSelection, tree) : toggleFolder(state.sourceSelection, tree, state.sourceBrowse.folderId),
+      'group'
+    ));
+    fragments.push(createElement('li', 'source-breadcrumb', [back, createElement('span', '', isUnfiled ? '未归档' : group.name), groupToggle]));
+    group.articles.forEach((article) => {
+      addRow(`article:${article.id}`, article.title, article.count, groupCheckState([article.id], state.sourceSelection), () => applySourceSelection(toggleArticle(state.sourceSelection, article.id), `article:${article.id}`));
+    });
+  }
+
+  const clear = createElement('button', 'text-button source-clear-all', '清空来源筛选');
+  clear.type = 'button';
+  clear.addEventListener('click', () => applySourceSelection(clearSelection(), ''));
+  const done = createElement('button', 'quiet-button source-done', '完成');
+  done.type = 'button';
+  done.addEventListener('click', closeSourcePanel);
+  const list = createElement('ul', 'source-rows', fragments);
+  const actions = createElement('div', 'source-actions', [clear, done]);
+  elements.sourcePanel.replaceChildren(list, actions);
+  if (state.sourceFocusKey) {
+    const target = elements.sourcePanel.querySelector(`[data-focus-key="${state.sourceFocusKey}"]`);
+    state.sourceFocusKey = '';
+    target?.focus();
+  }
+}
+
+function applySourceSelection(selection, focusKey) {
+  state.sourceSelection = selection;
+  state.sourceFocusKey = focusKey;
+  renderWordbook();
+}
+
+function openSourcePanel() {
+  state.sourceBrowse = { level: 'root', folderId: '' };
+  state.sourceFocusKey = '';
+  elements.sourcePanel.hidden = false;
+  elements.sourceTrigger.setAttribute('aria-expanded', 'true');
+  renderSourcePanel();
+}
+
+function closeSourcePanel() {
+  elements.sourcePanel.hidden = true;
+  elements.sourceTrigger.setAttribute('aria-expanded', 'false');
+}
+
 function renderWordbook() {
   const count = String(state.entries.length);
   elements.wordbookCount.textContent = count;
   elements.drawerCount.textContent = count;
-  const selectedSource = elements.wordSourceFilter.value;
-  const sources = new Map();
-  state.entries.forEach((entry) => Object.entries(entry.sources ?? {}).forEach(([id, source]) => sources.set(id, source.title)));
-  elements.wordSourceFilter.replaceChildren(new Option('全部来源文章', ''));
-  sources.forEach((title, id) => elements.wordSourceFilter.add(new Option(title, id)));
-  elements.wordSourceFilter.value = sources.has(selectedSource) ? selectedSource : '';
   elements.wordbookList.replaceChildren();
-  const visibleEntries = filterWords(state.entries, { query: elements.wordSearch.value, sourceId: elements.wordSourceFilter.value, ...state.wordFilters });
+  const tree = createSourceTree(state.entries, state.libraryIndex.articles, state.libraryIndex.folders);
+  const scoped = filterEntriesBySource(state.entries, state.sourceSelection);
+  const visibleEntries = filterWords(scoped, { query: elements.wordSearch.value, ...state.wordFilters });
+  renderSourceFilter(tree);
   if (visibleEntries.length === 0) {
-    elements.wordbookList.append(createElement('p', 'book-empty', '这里还没有单词。阅读时点击任意单词，再选择“加入单词本”。'));
+    const message = state.entries.length === 0
+      ? '这里还没有单词。阅读时点击任意单词，再选择“加入单词本”。'
+      : state.sourceSelection.all
+        ? '当前搜索或状态筛选下没有单词。'
+        : `“${describeSelection(state.sourceSelection, tree, state.entries).label}”下没有匹配的单词。`;
+    elements.wordbookList.append(createElement('p', 'book-empty', message));
     return;
   }
   for (const entry of visibleEntries) {
@@ -1146,6 +1268,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     closeContextMenu();
     closeQuestionModal();
+    closeSourcePanel();
   }
 });
 
@@ -1199,7 +1322,13 @@ document.querySelector('#close-wordbook').addEventListener('click', closeDrawer)
 document.querySelector('#export-wordbook').addEventListener('click', exportWordbook);
 document.querySelector('#export-wordbook-docx').addEventListener('click', exportWordbookDocx);
 elements.wordSearch.addEventListener('input', renderWordbook);
-elements.wordSourceFilter.addEventListener('change', renderWordbook);
+elements.sourceTrigger.addEventListener('click', () => {
+  if (elements.sourcePanel.hidden) openSourcePanel(); else closeSourcePanel();
+});
+elements.sourceClear.addEventListener('click', () => applySourceSelection(clearSelection(), ''));
+document.addEventListener('click', (event) => {
+  if (!elements.sourcePanel.hidden && !elements.sourcePanel.contains(event.target) && !elements.sourceTrigger.contains(event.target)) closeSourcePanel();
+});
 elements.wordQuickFilters.addEventListener('click', (event) => {
   const button = event.target.closest('button');
   if (!button) return;

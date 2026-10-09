@@ -107,7 +107,7 @@
       <div id="word-quick-filters" class="word-quick-filters" aria-label="词汇快捷筛选">
         <button type="button" data-status="">全部</button><button type="button" data-status="unknown">不会</button><button type="button" data-status="fuzzy">模糊</button><button type="button" data-status="known">认识</button><button type="button" data-tag="高频">高频</button><button type="button" data-tag="易混">易混</button><button type="button" data-tag="学术词">学术词</button>
       </div>
-      <div class="wordbook-filters"><input id="word-search" type="search" placeholder="搜索单词、释义或来源文章" /><select id="word-source-filter"><option value="">全部来源文章</option></select></div>
+      <div class="wordbook-filters"><input id="word-search" type="search" placeholder="搜索单词、释义或来源文章" /><div class="word-source-filter"><button id="word-source-trigger" class="word-source-trigger" type="button" aria-haspopup="true" aria-expanded="false"><span id="word-source-label">来源：全部单词</span><span id="word-source-detail" class="word-source-detail"></span><span class="word-source-caret" aria-hidden="true">▾</span></button><button id="word-source-clear" class="word-source-clear" type="button" hidden aria-label="清空来源筛选">×</button><div id="word-source-panel" class="word-source-panel" hidden role="group" aria-label="来源筛选"></div></div></div>
       <div id="wordbook-list" class="wordbook-list"></div>
       <button id="export-wordbook" class="primary-button export-button" type="button">导出为 Markdown <span>↓</span></button>
       <button id="export-wordbook-docx" class="quiet-button export-button" type="button">导出为 Word <span>↓</span></button>
