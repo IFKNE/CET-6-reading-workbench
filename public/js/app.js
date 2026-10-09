@@ -1,5 +1,5 @@
 import { splitParagraphs, tokenizeParagraph, classifySelection } from './text.js';
-import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, isWordSaved, savedWordKeys } from './wordbook.js';
+import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, isWordSaved, resolveStoredWordForm, savedWordKeys } from './wordbook.js';
 import { requestTranslation } from './api.js';
 import { createArticleKey, createWarmupBatches, indexVocabulary, mergeVocabulary } from './article-cache.js';
 import { createArticleRecord, countWordInArticle, dedupeArticles, restoreArticleState, updateArticleMetadata } from './article-model.js';
@@ -14,6 +14,7 @@ const demoArticle = `The ability to read critically is increasingly important in
 Critical reading does not mean reading with suspicion alone. It means asking useful questions: What is the writer trying to prove? Which details support the claim? What alternative explanation might exist?`;
 
 const frequencyOrder = { '最高频': 0, '常见': 1, '较少见': 2 };
+const SAVE_WORD_LABEL = '加入单词本  +';
 const storageKeys = {
   article: 'cet6:article',
   wordbook: 'cet6:wordbook',
@@ -524,7 +525,7 @@ function startWordWarmup() {
 function saveWordFromLookup(data, fallbackWord, context) {
   const senses = Array.isArray(data.senses) ? data.senses : [];
   return saveWord({
-    word: data.word || fallbackWord,
+    word: resolveStoredWordForm(data, fallbackWord),
     meaning: data.contextMeaning || senses[0]?.meaning || '待补充',
     partOfSpeech: senses[0]?.partOfSpeech || '词义',
     context,
@@ -606,8 +607,8 @@ async function lookupWord(word, context, saveAfterLookup = false) {
   if (cached) {
     renderWordAnnotation(cached, word, context);
     if (saveAfterLookup) {
-      const result = await saveWordFromLookup(cached, word, context);
-      refreshSavedWordUi(word, { animate: Boolean(result?.added) });
+      const saved = await saveWordFromLookup(cached, word, context);
+      refreshSavedWordUi(saved?.word ?? word, { animate: Boolean(saved?.added) });
     }
     setReaderStatus(`已从预研读缓存显示 “${word}”`);
     return;
@@ -626,8 +627,8 @@ async function lookupWord(word, context, saveAfterLookup = false) {
     renderWordAnnotation(data, word, context);
     saveLookupToPrestudy(data);
     if (saveAfterLookup) {
-      const result = await saveWordFromLookup(data, word, context);
-      refreshSavedWordUi(word, { animate: Boolean(result?.added) });
+      const saved = await saveWordFromLookup(data, word, context);
+      refreshSavedWordUi(saved?.word ?? word, { animate: Boolean(saved?.added) });
     }
     setReaderStatus(`已显示 “${word}” 的全部常见词义`);
   } catch (error) {
@@ -705,7 +706,7 @@ function renderAnnotationActions(data, word, context, animateSave) {
     actions.append(savedButton, detailButton);
     return actions;
   }
-  const saveButton = createElement('button', 'primary-button save-word', '加入单词本  +');
+  const saveButton = createElement('button', 'primary-button save-word', SAVE_WORD_LABEL);
   saveButton.type = 'button';
   saveButton.addEventListener('click', async () => {
     saveButton.disabled = true;
@@ -713,11 +714,11 @@ function renderAnnotationActions(data, word, context, animateSave) {
     saveButton.textContent = '正在加入…';
     try {
       const result = await saveWordFromLookup(data, word, context);
-      refreshSavedWordUi(word, { animate: Boolean(result?.added) });
+      refreshSavedWordUi(result?.word ?? word, { animate: Boolean(result?.added) });
     } catch (error) {
       saveButton.disabled = false;
       saveButton.classList.remove('is-saving');
-      saveButton.textContent = '加入单词本  +';
+      saveButton.textContent = SAVE_WORD_LABEL;
       setReaderStatus(error.message);
     }
   });
@@ -777,7 +778,7 @@ async function saveWord(entry) {
   localStorage.setItem(storageKeys.wordbook, JSON.stringify(state.entries));
   renderWordbook();
   setReaderStatus(`“${entry.word}” ${alreadySaved ? '已更新到单词本' : '已加入单词本'}`);
-  return { added: !alreadySaved };
+  return { added: !alreadySaved, word: normalizeWord(entry.word) };
 }
 
 function updateWordEntry(word, changes) {
@@ -847,6 +848,7 @@ function renderArchiveBlock(entry) {
 function openWordDetail(word, origin) {
   state.detailWord = String(word ?? '').trim().toLowerCase();
   state.detailOrigin = origin === 'reader' ? 'reader' : 'wordbook';
+  state.scrollMemory['word-detail'] = 0;
   switchView('word-detail');
 }
 
@@ -910,11 +912,10 @@ function renderWordDetail() {
   const back = createElement('button', 'text-button back-button', backTarget.label);
   back.type = 'button'; back.addEventListener('click', () => leaveWordDetail(backTarget.view));
   const remove = createElement('button', 'article-delete', '从单词本移除');
-  const removeTarget = resolveViewBack({ view: 'word-detail', origin: state.detailOrigin, hasArticle: Boolean(state.article) });
   remove.type = 'button'; remove.addEventListener('click', () => {
     state.entries = state.entries.filter((item) => item.word !== entry.word);
     localStorage.setItem(storageKeys.wordbook, JSON.stringify(state.entries));
-    leaveWordDetail(removeTarget.view);
+    leaveWordDetail(backTarget.view);
   });
   const statuses = [['unknown', '不会'], ['fuzzy', '模糊'], ['known', '认识']];
   const statusControls = createElement('div', 'word-status-controls');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, getWordContextSentence, isWordSaved, savedWordKeys } from '../public/js/wordbook.js';
+import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, getWordContextSentence, isWordSaved, resolveStoredWordForm, savedWordKeys } from '../public/js/wordbook.js';
 
 test('同一词形更新而不是重复收藏', () => {
   const first = addOrUpdateWord([], { word: 'study', meaning: '学习', partOfSpeech: 'v.', context: 'I study every day.', savedAt: '2026-10-05' });
@@ -78,4 +78,11 @@ test('已收录判定忽略词形首尾空白', () => {
   assert.equal(isWordSaved([{ word: '  Critical  ' }], ' critical '), true);
   assert.equal(savedWordKeys([{ word: '  Evidence ' }]).has('evidence'), true);
   assert.equal(savedWordKeys([{ word: '   ' }]).size, 0);
+});
+
+test('入库词形以 AI 词元为准并统一小写去空白', () => {
+  assert.equal(resolveStoredWordForm({ word: 'Run' }, 'running'), 'run');
+  assert.equal(resolveStoredWordForm({}, '  Running '), 'running');
+  assert.equal(resolveStoredWordForm(null, 'running'), 'running');
+  assert.equal(resolveStoredWordForm({ word: '' }, 'running'), 'running');
 });

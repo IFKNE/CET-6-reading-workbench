@@ -27,6 +27,11 @@ export function isWordSaved(entries, word) {
   return Boolean(key) && savedWordKeys(entries).has(key);
 }
 
+// 条目实际入库的词形：AI 给出的词元优先，统一小写去空白，落库与界面刷新共用这一处。
+export function resolveStoredWordForm(data, fallbackWord) {
+  return String(data?.word || fallbackWord || '').trim().toLowerCase();
+}
+
 export function createMarkdown(entries, exportedAt) {
   const rows = ['# 六级精读单词本', '', `导出日期：${exportedAt}`, ''];
   for (const item of entries) {
