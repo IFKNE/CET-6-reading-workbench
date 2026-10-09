@@ -1,10 +1,11 @@
 import { splitParagraphs, tokenizeParagraph, classifySelection } from './text.js';
-import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords } from './wordbook.js';
+import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, isWordSaved, savedWordKeys } from './wordbook.js';
 import { requestTranslation } from './api.js';
 import { createArticleKey, createWarmupBatches, indexVocabulary, mergeVocabulary } from './article-cache.js';
 import { createArticleRecord, countWordInArticle, dedupeArticles, restoreArticleState, updateArticleMetadata } from './article-model.js';
 import { createFolder, deleteArticle, deleteFolder, getArticle, listArticles, listFolders, saveArticle } from './article-library.js';
 import { nextTheme, readTheme } from './theme.js';
+import { resolveViewBack } from './view-nav.js';
 import { createRequestLock } from './request-lock.js';
 import { PRESTUDY_TRANSLATION_VERSION, normalizePrestudyTranslation } from './prestudy.js';
 
@@ -79,11 +80,15 @@ const state = {
   folderId: '',
   libraryFolderId: 'all',
   libraryRenderId: 0,
-  detailWord: '',
   notes: {},
   expandedTranslations: new Set(),
   expandedNotes: new Set(),
   category: '短篇阅读',
+  viewOrigin: '',
+  detailWord: '',
+  detailOrigin: 'wordbook',
+  annotation: null,
+  scrollMemory: {},
   view: 'paste',
   wordFilters: { status: '', tag: '' }
 };
@@ -157,24 +162,43 @@ function switchToPaste() {
 }
 
 function switchView(view) {
+  const previousView = state.view;
+  if (view !== previousView) {
+    state.scrollMemory[previousView] = window.scrollY;
+    // 详情页是叶子视图：返回时不覆盖“来时的来源”，
+    // 否则 原文 → 单词本 → 详情 → 返回单词本 → × 会又跳回详情。
+    if (previousView !== 'word-detail') state.viewOrigin = previousView;
+  }
   state.view = view;
   elements.pasteView.hidden = view !== 'paste';
   elements.readerView.hidden = view !== 'reader';
   elements.libraryView.hidden = view !== 'library';
   elements.wordbookView.hidden = view !== 'wordbook';
   elements.wordDetailView.hidden = view !== 'word-detail';
-  document.querySelectorAll('[data-view]').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view || (view === 'word-detail' && button.dataset.view === 'wordbook')));
+  // 顶部导航高亮跟随来源分区：从原文进详情页时不高亮“单词本”。
+  const highlightView = view === 'word-detail' ? (state.detailOrigin === 'wordbook' ? 'wordbook' : '') : view;
+  document.querySelectorAll('[data-view]').forEach((button) => button.classList.toggle('is-active', button.dataset.view === highlightView));
   if (view === 'library') renderArticleLibrary();
   if (view === 'wordbook') renderWordbook();
   if (view === 'word-detail') renderWordDetail();
+  if (view !== previousView) {
+    window.requestAnimationFrame(() => window.scrollTo(0, state.scrollMemory[view] ?? 0));
+  }
+}
+
+function setAnnotationContent(content, annotation = null) {
+  state.annotation = annotation;
+  elements.annotationPanel.replaceChildren(...content);
 }
 
 function resetAnnotation() {
-  elements.annotationPanel.replaceChildren(createElement('div', 'annotation-empty', [
-    createElement('span', 'annotation-mark', '✦'),
-    createElement('p', '', '点击一个单词，或选中一段文字。'),
-    createElement('small', '', '释义、翻译与学习笔记会显示在这里。')
-  ]));
+  setAnnotationContent([
+    createElement('div', 'annotation-empty', [
+      createElement('span', 'annotation-mark', '✦'),
+      createElement('p', '', '点击一个单词，或选中一段文字。'),
+      createElement('small', '', '释义、翻译与学习笔记会显示在这里。')
+    ])
+  ]);
 }
 
 function createElement(tag, className, content) {
@@ -191,22 +215,44 @@ function selectedCategory() {
     : elements.articleCategory.value;
 }
 
-function renderKeyVocabulary() {
+function renderKeyVocabulary({ animateWord = '' } = {}) {
   elements.keyVocabulary.replaceChildren();
   const vocabulary = Object.values(state.prestudy?.vocabulary ?? {});
   if (!vocabulary.length) {
     elements.keyVocabulary.append(createElement('p', 'book-empty', state.prestudyPending ? '正在准备本篇重点词…' : '本篇尚无可展示的重点词。'));
     return;
   }
+  const saved = savedWordKeys(state.entries);
+  const animateKey = String(animateWord ?? '').trim().toLowerCase();
   vocabulary.slice(0, 24).forEach((item) => {
-    const button = createElement('button', 'key-word-card', [
+    const key = String(item.word ?? '').trim().toLowerCase();
+    const isSaved = saved.has(key);
+    const classes = ['key-word-card'];
+    if (isSaved) classes.push('is-saved');
+    if (animateKey && key === animateKey) classes.push('is-just-saved');
+    const button = createElement('button', classes.join(' '), [
       createElement('strong', '', item.word),
       createElement('span', '', item.contextMeaning || item.senses?.[0]?.meaning || '查看释义')
     ]);
+    if (isSaved) {
+      const check = createElement('span', 'key-word-card-check', '✓');
+      check.setAttribute('aria-hidden', 'true');
+      button.append(check);
+    }
     button.type = 'button';
     button.addEventListener('click', () => renderWordAnnotation(item, item.word, state.article));
     elements.keyVocabulary.append(button);
   });
+}
+
+// 加入/移除单词后，面板、重点词卡片、单词本列表必须看到同一份状态。
+function refreshSavedWordUi(word, { animate = false } = {}) {
+  const key = String(word ?? '').trim().toLowerCase();
+  renderKeyVocabulary({ animateWord: animate ? key : '' });
+  if (state.annotation && String(state.annotation.word ?? '').trim().toLowerCase() === key) {
+    renderWordAnnotation(state.annotation.data, state.annotation.word, state.annotation.context, { animateSave: animate });
+  }
+  renderWordbook();
 }
 
 async function persistArticle(showStatus = true) {
@@ -352,19 +398,19 @@ async function openSavedArticle(id) {
 }
 
 function showLoading(source) {
-  elements.annotationPanel.replaceChildren(
+  setAnnotationContent([
     createElement('p', 'annotation-label', '正在查询'),
     createElement('p', 'annotation-source', source),
     createElement('p', 'annotation-translation', 'DeepSeek 正在整理适合六级精读的解释…')
-  );
+  ]);
 }
 
 function showError(source, error) {
-  elements.annotationPanel.replaceChildren(
+  setAnnotationContent([
     createElement('p', 'annotation-label', '暂时无法翻译'),
     createElement('p', 'annotation-source', source),
     createElement('p', 'annotation-translation', error.message)
-  );
+  ]);
 }
 
 function renderArticle() {
@@ -477,7 +523,7 @@ function startWordWarmup() {
 
 function saveWordFromLookup(data, fallbackWord, context) {
   const senses = Array.isArray(data.senses) ? data.senses : [];
-  saveWord({
+  return saveWord({
     word: data.word || fallbackWord,
     meaning: data.contextMeaning || senses[0]?.meaning || '待补充',
     partOfSpeech: senses[0]?.partOfSpeech || '词义',
@@ -559,7 +605,10 @@ async function lookupWord(word, context, saveAfterLookup = false) {
   const cached = state.prestudy?.vocabulary?.[normalizeWord(word)];
   if (cached) {
     renderWordAnnotation(cached, word, context);
-    if (saveAfterLookup) saveWordFromLookup(cached, word, context);
+    if (saveAfterLookup) {
+      const result = await saveWordFromLookup(cached, word, context);
+      refreshSavedWordUi(word, { animate: Boolean(result?.added) });
+    }
     setReaderStatus(`已从预研读缓存显示 “${word}”`);
     return;
   }
@@ -576,7 +625,10 @@ async function lookupWord(word, context, saveAfterLookup = false) {
     if (!data) throw new Error('暂未获得该单词的释义，请重试。');
     renderWordAnnotation(data, word, context);
     saveLookupToPrestudy(data);
-    if (saveAfterLookup) saveWordFromLookup(data, word, context);
+    if (saveAfterLookup) {
+      const result = await saveWordFromLookup(data, word, context);
+      refreshSavedWordUi(word, { animate: Boolean(result?.added) });
+    }
     setReaderStatus(`已显示 “${word}” 的全部常见词义`);
   } catch (error) {
     showError(word, error);
@@ -584,7 +636,7 @@ async function lookupWord(word, context, saveAfterLookup = false) {
   }
 }
 
-function renderWordAnnotation(data, queriedWord, context) {
+function renderWordAnnotation(data, queriedWord, context, { animateSave = false } = {}) {
   const word = data.word || queriedWord;
   const senses = Array.isArray(data.senses) ? data.senses : [];
   const groups = new Map();
@@ -636,11 +688,41 @@ function renderWordAnnotation(data, queriedWord, context) {
     ]));
   }
 
+  content.push(renderAnnotationActions(data, word, context, animateSave));
+  setAnnotationContent(content, { data, word, context });
+}
+
+function renderAnnotationActions(data, word, context, animateSave) {
+  const actions = createElement('div', 'annotation-actions');
+  if (isWordSaved(state.entries, word)) {
+    const savedButton = createElement('button', `primary-button save-word is-saved${animateSave ? ' is-just-saved' : ''}`, '已加入单词本 ✓');
+    savedButton.type = 'button';
+    savedButton.disabled = true;
+    savedButton.setAttribute('aria-disabled', 'true');
+    const detailButton = createElement('button', 'text-button word-detail-link', '查看完整详情 →');
+    detailButton.type = 'button';
+    detailButton.addEventListener('click', () => openWordDetail(word, 'reader'));
+    actions.append(savedButton, detailButton);
+    return actions;
+  }
   const saveButton = createElement('button', 'primary-button save-word', '加入单词本  +');
   saveButton.type = 'button';
-  saveButton.addEventListener('click', () => saveWordFromLookup(data, word, context));
-  content.push(saveButton);
-  elements.annotationPanel.replaceChildren(...content);
+  saveButton.addEventListener('click', async () => {
+    saveButton.disabled = true;
+    saveButton.classList.add('is-saving');
+    saveButton.textContent = '正在加入…';
+    try {
+      const result = await saveWordFromLookup(data, word, context);
+      refreshSavedWordUi(word, { animate: Boolean(result?.added) });
+    } catch (error) {
+      saveButton.disabled = false;
+      saveButton.classList.remove('is-saving');
+      saveButton.textContent = '加入单词本  +';
+      setReaderStatus(error.message);
+    }
+  });
+  actions.append(saveButton);
+  return actions;
 }
 
 function renderArticleTranslation() {
@@ -659,7 +741,7 @@ function renderArticleTranslation() {
       createElement('p', '', translation[index] || '该段译文暂未生成，请点击原文下方“翻译本段”。')
     ]));
   });
-  elements.annotationPanel.replaceChildren(...content);
+  setAnnotationContent(content);
   setReaderStatus('已显示缓存的全文译文');
 }
 
@@ -670,11 +752,11 @@ async function translateText(scope, text) {
   setReaderStatus('正在翻译选中的内容…');
   try {
     const result = await request;
-    elements.annotationPanel.replaceChildren(
+    setAnnotationContent([
       createElement('p', 'annotation-label', `${scope === 'paragraph' ? '段落' : scope === 'sentence' ? '句子' : '短语'}翻译`),
       createElement('p', 'annotation-source', text),
       createElement('p', 'annotation-translation', result.translation)
-    );
+    ]);
     setReaderStatus('翻译完成');
   } catch (error) {
     showError(text, error);
@@ -685,6 +767,7 @@ async function translateText(scope, text) {
 async function saveWord(entry) {
   const savedAt = new Date().toISOString().slice(0, 10);
   if (!state.articleId && state.article.trim()) await persistArticle(false);
+  const alreadySaved = isWordSaved(state.entries, entry.word);
   const source = state.articleId ? {
     articleId: state.articleId,
     title: state.prestudy?.title || '未命名精读文章',
@@ -693,7 +776,8 @@ async function saveWord(entry) {
   state.entries = addOrUpdateWord(state.entries, { ...entry, savedAt, source });
   localStorage.setItem(storageKeys.wordbook, JSON.stringify(state.entries));
   renderWordbook();
-  setReaderStatus(`“${entry.word}” 已加入单词本`);
+  setReaderStatus(`“${entry.word}” ${alreadySaved ? '已更新到单词本' : '已加入单词本'}`);
+  return { added: !alreadySaved };
 }
 
 function updateWordEntry(word, changes) {
@@ -760,6 +844,19 @@ function renderArchiveBlock(entry) {
   return block;
 }
 
+function openWordDetail(word, origin) {
+  state.detailWord = String(word ?? '').trim().toLowerCase();
+  state.detailOrigin = origin === 'reader' ? 'reader' : 'wordbook';
+  switchView('word-detail');
+}
+
+function leaveWordDetail(targetView) {
+  const word = state.detailWord;
+  state.detailWord = '';
+  switchView(targetView);
+  refreshSavedWordUi(word, { animate: false });
+}
+
 function renderWordbook() {
   const count = String(state.entries.length);
   elements.wordbookCount.textContent = count;
@@ -796,7 +893,7 @@ function renderWordbook() {
       createElement('span', 'word-row-arrow', '查看 →')
     ]);
     row.type = 'button';
-    row.addEventListener('click', () => { state.detailWord = entry.word; switchView('word-detail'); });
+    row.addEventListener('click', () => openWordDetail(entry.word, 'wordbook'));
     elements.wordbookList.append(row);
   }
 }
@@ -809,13 +906,15 @@ function renderWordDetail() {
     return;
   }
   const summary = createWordSummary(entry);
-  const back = createElement('button', 'text-button back-button', '← 返回单词本');
-  back.type = 'button'; back.addEventListener('click', () => switchView('wordbook'));
+  const backTarget = resolveViewBack({ view: 'word-detail', origin: state.detailOrigin, hasArticle: Boolean(state.article) });
+  const back = createElement('button', 'text-button back-button', backTarget.label);
+  back.type = 'button'; back.addEventListener('click', () => leaveWordDetail(backTarget.view));
   const remove = createElement('button', 'article-delete', '从单词本移除');
+  const removeTarget = resolveViewBack({ view: 'word-detail', origin: state.detailOrigin, hasArticle: Boolean(state.article) });
   remove.type = 'button'; remove.addEventListener('click', () => {
     state.entries = state.entries.filter((item) => item.word !== entry.word);
     localStorage.setItem(storageKeys.wordbook, JSON.stringify(state.entries));
-    state.detailWord = ''; switchView('wordbook');
+    leaveWordDetail(removeTarget.view);
   });
   const statuses = [['unknown', '不会'], ['fuzzy', '模糊'], ['known', '认识']];
   const statusControls = createElement('div', 'word-status-controls');
@@ -910,11 +1009,11 @@ async function askArticle(question) {
   setReaderStatus('AI 正在结合全文组织回答…');
   try {
     const result = await request;
-    elements.annotationPanel.replaceChildren(
+    setAnnotationContent([
       createElement('p', 'annotation-label', '全文问答'),
       createElement('p', 'annotation-source', question),
       createElement('p', 'annotation-translation', result.answer)
-    );
+    ]);
     setReaderStatus('全文问答完成');
   } catch (error) {
     showError(question, error);
@@ -927,7 +1026,8 @@ function openDrawer() {
 }
 
 function closeDrawer() {
-  switchView(state.article ? 'reader' : 'paste');
+  const target = resolveViewBack({ view: 'wordbook', origin: state.viewOrigin, hasArticle: Boolean(state.article) });
+  switchView(target.view);
 }
 
 function updateSelectionActions() {
@@ -1081,7 +1181,8 @@ document.querySelector('#save-selection-phrase').addEventListener('click', async
   button.textContent = '正在收录…';
   try {
     const result = await request;
-    await saveWord({ word: phrase, meaning: result.translation, partOfSpeech: '短语', context: phrase, entryType: 'phrase' });
+    const saved = await saveWord({ word: phrase, meaning: result.translation, partOfSpeech: '短语', context: phrase, entryType: 'phrase' });
+    refreshSavedWordUi(phrase, { animate: Boolean(saved?.added) });
     elements.selectionActions.hidden = true; window.getSelection()?.removeAllRanges();
   } catch (error) {
     setReaderStatus(error.message);
