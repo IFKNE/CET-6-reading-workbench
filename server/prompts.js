@@ -1,3 +1,5 @@
+import { splitParagraphs } from '../public/js/text.js';
+
 const wordSystemPrompt = `你是一名大学英语六级（CET-6）阅读精读老师。只返回合法 JSON，不要 Markdown，不要额外说明。
 JSON 格式必须为：
 {
@@ -52,7 +54,8 @@ export function buildMessages({ scope, text, context = '' }) {
   }
 
   if (scope === 'prestudy') {
-    const paragraphs = text.split(/\r?\n\s*\r?\n/).map((item) => item.trim()).filter(Boolean);
+    // 与前端共用同一套分段逻辑，paragraphIndex 才能和阅读页的段落一一对应。
+    const paragraphs = splitParagraphs(text);
     const numberedParagraphs = paragraphs.map((paragraph, index) => `段落 ${index}：\n${paragraph}`).join('\n\n');
     return [
       {
@@ -60,7 +63,7 @@ export function buildMessages({ scope, text, context = '' }) {
         content: `你是一名大学英语六级（CET-6）阅读精读老师。只返回合法 JSON，不要 Markdown，不要额外说明。
 请对文章做一次预研读，并返回如下结构：
 {
-  "title": "8到18字的中文六级精读标题",
+  "title": "4到18字的中文六级精读标题",
   "translationVersion": 2,
   "translation": [{"paragraphIndex": 0, "text": "与段落 0 对应的自然中文译文"}],
   "vocabulary": [
@@ -75,7 +78,7 @@ export function buildMessages({ scope, text, context = '' }) {
     }
   ]
 }
-title 是概括文章主题的中文标题，限 8 到 18 字，不用书名号。translation 是全文译文，必须为每个原文段落各生成一项，paragraphIndex 使用从 0 开始的原文段落编号，且每个编号只能出现一次；不要合并、拆分、跳过或调换段落。text 只放对应段落的中文译文。vocabulary 只选 12 到 24 个适合大学英语六级学习、可能不熟悉的高频实义词、常见多义词、学术/抽象词或固定搭配核心词；不选冠词、代词、基础介词、基础连接词和明显简单词。释义优先六级阅读语境义、常考搭配和易混含义。每个词给最多三个 phrases。senses 先按词性分组，并在每个词性内按“最高频”、“常见”、“较少见”排序。`
+title 是概括文章主题的中文标题，限 4 到 18 字，不用书名号。translation 是全文译文，必须为每个原文段落各生成一项，paragraphIndex 使用从 0 开始的原文段落编号，且每个编号只能出现一次；不要合并、拆分、跳过或调换段落。text 只放对应段落的中文译文。vocabulary 只选 12 到 24 个适合大学英语六级学习、可能不熟悉的高频实义词、常见多义词、学术/抽象词或固定搭配核心词；不选冠词、代词、基础介词、基础连接词和明显简单词。释义优先六级阅读语境义、常考搭配和易混含义。每个词给最多三个 phrases。senses 先按词性分组，并在每个词性内按“最高频”、“常见”、“较少见”排序。`
       },
       { role: 'user', content: `文章原文（以下段落编号是唯一对应依据）：\n${numberedParagraphs}` }
     ];
