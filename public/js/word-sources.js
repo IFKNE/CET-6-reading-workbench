@@ -126,25 +126,35 @@ function findArticle(tree, articleId) {
   return pools.find((article) => article.id === articleId);
 }
 
+// 文章可能因为单词被删光而不在来源树里，退回条目 sources 上保存的标题。
+function findStoredTitle(entries, articleId) {
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const title = entry?.sources?.[articleId]?.title;
+    if (title) return String(title);
+  }
+  return '';
+}
+
+// 侧栏「项」按用户视角折叠：选满的文件夹算一项，其内文章不再单独计数。
 export function describeSelection(selection, tree, entries) {
   if (!selection || selection.all) return { label: '全部单词', detail: '', active: false };
   const articleIds = (selection.articleIds ?? []).map(String);
   const includeUnlinked = Boolean(selection.includeUnlinked);
-  const wholeFolder = (tree?.folders ?? []).find((folder) => (
-    !includeUnlinked &&
+  const folders = tree?.folders ?? [];
+  const selectedFolderIds = new Set(articleIds);
+  const fullFolders = folders.filter((folder) => (
     folder.articleIds.length > 0 &&
-    folder.articleIds.length === articleIds.length &&
-    folder.articleIds.every((id) => articleIds.includes(id))
+    folder.articleIds.every((id) => selectedFolderIds.has(id))
   ));
-  const names = articleIds.map((id) => findArticle(tree, id)?.title ?? '已删除的文章');
+  const covered = new Set(fullFolders.flatMap((folder) => folder.articleIds));
+  const names = [
+    ...fullFolders.map((folder) => folder.name),
+    ...articleIds
+      .filter((id) => !covered.has(id))
+      .map((id) => findArticle(tree, id)?.title || findStoredTitle(entries, id) || '文章已不在精读库')
+  ];
   if (includeUnlinked) names.push('未关联文章');
-  const label = wholeFolder
-    ? wholeFolder.name
-    : names.length === 1
-      ? names[0]
-      : names.length
-        ? `${names[0]} +${names.length - 1} 项`
-        : '全部单词';
+  const label = names.length === 1 ? names[0] : names.length ? `${names[0]} +${names.length - 1} 项` : '全部单词';
   const wordCount = filterEntriesBySource(entries, selection).length;
   return { label, detail: `已选 ${names.length} 项 · ${wordCount} 个单词`, active: true };
 }

@@ -130,7 +130,8 @@ test('多选时显示首项与其余数量', () => {
   const sourceTree = createSourceTree(entries, articles, folders);
   const selection = { all: false, articleIds: ['a1', 'a3'], includeUnlinked: false };
   const described = describeSelection(selection, sourceTree, entries);
-  assert.equal(described.label, '对话一 +1 项');
+  // a1 是 f1 里唯一有单词的文章，勾上 a1 就等于勾满 f1，因此首项是文件夹名。
+  assert.equal(described.label, '听力文件夹 +1 项');
   assert.equal(described.detail, '已选 2 项 · 2 个单词');
   assert.equal(described.active, true);
 });
@@ -138,4 +139,45 @@ test('多选时显示首项与其余数量', () => {
 test('只勾未关联文章时的文案', () => {
   const sourceTree = createSourceTree(entries, articles, folders);
   assert.equal(describeSelection(toggleUnlinked(selectAll()), sourceTree, entries).label, '未关联文章');
+});
+
+test('勾满一个文件夹只算一项', () => {
+  const sourceTree = createSourceTree(entries, articles, folders);
+  const described = describeSelection(toggleFolder(selectAll(), sourceTree, 'f1'), sourceTree, entries);
+  assert.equal(described.label, '听力文件夹');
+  assert.equal(described.detail, '已选 1 项 · 2 个单词');
+});
+
+test('勾满两个文件夹时标签用文件夹名相加', () => {
+  const manyEntries = [
+    { word: 'critical', sources: { a1: { title: '对话一' } } },
+    { word: 'evidence', sources: { a2: { title: '对话二' } } }
+  ];
+  const manyArticles = [
+    { id: 'a1', title: '对话一', folderId: 'f1' },
+    { id: 'a2', title: '对话二', folderId: 'f2' }
+  ];
+  const manyFolders = [{ id: 'f1', name: '听力文件夹' }, { id: 'f2', name: '阅读文件夹' }];
+  const sourceTree = createSourceTree(manyEntries, manyArticles, manyFolders);
+  const first = toggleFolder(selectAll(), sourceTree, 'f1');
+  const both = { ...first, all: false, articleIds: [...first.articleIds, 'a2'] };
+  const described = describeSelection(both, sourceTree, manyEntries);
+  assert.equal(described.detail, '已选 2 项 · 2 个单词');
+  assert.ok(described.label.startsWith('听力文件夹') || described.label.startsWith('阅读文件夹'));
+  assert.match(described.label, /\+1 项$/);
+});
+
+test('文件夹加它之外的文章算两项', () => {
+  const sourceTree = createSourceTree(entries, articles, folders);
+  const selection = { all: false, articleIds: ['a1', 'a3'], includeUnlinked: false };
+  const described = describeSelection(selection, sourceTree, entries);
+  assert.equal(described.label, '听力文件夹 +1 项');
+  assert.equal(described.detail, '已选 2 项 · 2 个单词');
+});
+
+test('文章单词被移除后仍显示条目里保存的标题', () => {
+  const leftWithNothing = [{ word: 'critical', sources: { a1: { title: '对话一' }, a3: { title: '长篇一' } } }];
+  const sourceTree = createSourceTree(leftWithNothing, articles, folders);
+  const selection = { all: false, articleIds: ['a3'], includeUnlinked: false };
+  assert.equal(describeSelection(selection, sourceTree, leftWithNothing).label, '长篇一');
 });
