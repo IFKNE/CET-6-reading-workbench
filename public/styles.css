@@ -151,6 +151,23 @@ html[data-theme="dark"] .reader-paper .paragraph-translate { color: #216d5d; }
 .article-translation { margin-top: 19px; padding-top: 15px; border-top: 1px solid rgba(36, 93, 79, .18); }
 .article-translation p { margin: 8px 0 0; font-size: 15px; line-height: 1.78; }
 .save-word { width: 100%; margin-top: 24px; }
+.annotation-actions { display: grid; gap: 10px; margin-top: 24px; }
+.annotation-actions .save-word { margin-top: 0; }
+.word-detail-link { justify-self: center; }
+.save-word.is-saving { animation: save-word-press .3s ease; }
+.save-word.is-just-saved { animation: save-word-pop .5s cubic-bezier(.2, .9, .3, 1.4), save-word-ring .7s ease-out; }
+.save-word.is-saved { color: var(--green-dark); background: rgba(23, 105, 90, .12); box-shadow: none; }
+.key-word-card { position: relative; }
+.key-word-card.is-saved strong { color: var(--green); }
+.key-word-card .key-word-card-check { position: absolute; top: 9px; right: 10px; display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; color: #fffdf6; background: var(--green); font-size: 11px; line-height: 1; }
+.key-word-card.is-just-saved .key-word-card-check { animation: key-word-check-pop .42s cubic-bezier(.2, .9, .3, 1.4); }
+@keyframes save-word-press { 50% { transform: translate(2px, 2px) scale(.99); } }
+@keyframes save-word-pop { 35% { transform: scale(1.04); } }
+@keyframes save-word-ring { from { box-shadow: 0 0 0 0 rgba(23, 105, 90, .45); } to { box-shadow: 0 0 0 16px rgba(23, 105, 90, 0); } }
+@keyframes key-word-check-pop { from { transform: scale(.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .save-word.is-saving, .save-word.is-just-saved, .key-word-card.is-just-saved .key-word-card-check { animation: none; }
+}
 .selection-actions { position: fixed; z-index: 10; left: 50%; bottom: 28px; max-width: min(680px, calc(100% - 32px)); display: flex; align-items: center; gap: 10px; padding: 8px 9px 8px 15px; border: 1px solid rgba(255,255,255,.42); border-radius: 3px; color: #f8f3e6; background: var(--ink); box-shadow: 7px 7px 0 rgba(23,105,90,.2); transform: translateX(-50%); }
 .selection-actions span { overflow: hidden; max-width: 420px; text-overflow: ellipsis; white-space: nowrap; font: italic 13px var(--serif); }
 .selection-actions button { flex: none; border: 0; padding: 8px 11px; color: var(--ink); background: var(--marker); font-weight: 800; font-size: 12px; }
@@ -233,6 +250,7 @@ html[data-theme="dark"] .wordbook-row, html[data-theme="dark"] .word-detail-shee
 html[data-theme="dark"] textarea, html[data-theme="dark"] .article-card, html[data-theme="dark"] .key-word-card { background: rgba(255,255,255,.055); }
 html[data-theme="dark"] .article-options select, html[data-theme="dark"] .article-options input { color: var(--ink); background: rgba(255,255,255,.06); }
 html[data-theme="dark"] .annotation-panel { border-color: var(--green); color: #25342e; background: #d8d1c2; box-shadow: 7px 7px 0 rgba(0,0,0,.26); }
+html[data-theme="dark"] .save-word.is-saved { color: var(--green); background: rgba(114, 187, 167, .16); }
 html[data-theme="dark"] .annotation-panel .context-meaning, html[data-theme="dark"] .annotation-panel .phonetic, html[data-theme="dark"] .annotation-panel .example-chinese, html[data-theme="dark"] .annotation-panel .phrase-list span { color: #3f5148; }
 html[data-theme="dark"] .annotation-panel .phrase-list strong, html[data-theme="dark"] .annotation-panel .sense-group h3 { color: #075e50; }
 html[data-theme="dark"] .inline-translation { color: #26342f; background: rgba(174,207,194,.76); }

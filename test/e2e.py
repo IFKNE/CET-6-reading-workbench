@@ -25,6 +25,16 @@ def main():
         page.locator("#article-input").fill(ARTICLE)
         page.get_by_role("button", name="开始精读").click()
         assert page.locator("#reader-view").is_visible()
+        # 需要可用的 /api/translate（DeepSeek Key + 网络）；离线环境下这几步会超时失败。
+        page.locator(".word-token").first.click()
+        page.locator(".save-word").click()
+        assert page.locator(".save-word.is-saved").count() == 1
+        assert page.locator(".word-detail-link").is_visible()
+        page.locator(".word-detail-link").click()
+        assert page.locator("#word-detail-view").is_visible()
+        assert page.get_by_role("button", name="返回原文").is_visible()
+        page.get_by_role("button", name="返回原文").click()
+        assert page.locator("#reader-view").is_visible()
         assert page.locator(".article-paragraph").count() == 2
         assert page.locator(".word-token").count() > 10
         assert page.locator("#save-article").is_visible()
