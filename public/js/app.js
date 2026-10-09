@@ -1327,7 +1327,7 @@ elements.sourceTrigger.addEventListener('click', () => {
 });
 elements.sourceClear.addEventListener('click', () => applySourceSelection(clearSelection(), ''));
 document.addEventListener('click', (event) => {
-  if (!elements.sourcePanel.hidden && !elements.sourcePanel.contains(event.target) && !elements.sourceTrigger.contains(event.target)) closeSourcePanel();
+  if (!elements.sourcePanel.hidden && !elements.sourcePanel.contains(event.target) && !elements.sourceTrigger.contains(event.target) && !elements.sourceClear.contains(event.target)) closeSourcePanel();
 });
 elements.wordQuickFilters.addEventListener('click', (event) => {
   const button = event.target.closest('button');
