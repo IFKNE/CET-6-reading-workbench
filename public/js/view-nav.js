@@ -16,5 +16,7 @@ export function resolveViewBack({ view, origin = '', hasArticle = false } = {}) 
   const fallback = hasArticle
     ? { view: 'reader', label: '← 返回原文' }
     : { view: 'paste', label: '← 返回文章输入' };
-  return backTargets[view]?.[origin] ?? fallback;
+  const target = backTargets[view]?.[origin];
+  // 返回副本：调用方改动返回值时不会污染模块级的 backTargets 表。
+  return target ? { ...target } : fallback;
 }

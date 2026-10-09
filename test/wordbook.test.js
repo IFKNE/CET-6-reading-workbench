@@ -73,3 +73,9 @@ test('已收录词形集合可一次性标记重点词卡片', () => {
   assert.equal(keys.has('evidence'), true);
   assert.equal(keys.size, 2);
 });
+
+test('已收录判定忽略词形首尾空白', () => {
+  assert.equal(isWordSaved([{ word: '  Critical  ' }], ' critical '), true);
+  assert.equal(savedWordKeys([{ word: '  Evidence ' }]).has('evidence'), true);
+  assert.equal(savedWordKeys([{ word: '   ' }]).size, 0);
+});

@@ -22,3 +22,10 @@ test('没有来源记录时按是否有文章兜底', () => {
   assert.deepEqual(resolveViewBack({ view: 'wordbook', origin: '', hasArticle: false }), { view: 'paste', label: '← 返回文章输入' });
   assert.deepEqual(resolveViewBack({ view: 'word-detail', origin: '', hasArticle: false }), { view: 'paste', label: '← 返回文章输入' });
 });
+
+test('返回的目标对象不会被调用方修改污染', () => {
+  const first = resolveViewBack({ view: 'wordbook', origin: 'library', hasArticle: true });
+  first.view = '篡改';
+  first.label = '篡改';
+  assert.deepEqual(resolveViewBack({ view: 'wordbook', origin: 'library', hasArticle: true }), { view: 'library', label: '← 返回我的精读' });
+});
