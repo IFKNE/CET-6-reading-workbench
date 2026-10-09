@@ -423,6 +423,18 @@ function showError(source, error) {
     ]);
 ```
 
+还有**第 6 处**：`translateText(scope, text)` 的成功分支（原 `elements.annotationPanel.replaceChildren(...)`）→
+
+```js
+    setAnnotationContent([
+      createElement('p', 'annotation-label', `${scope === 'paragraph' ? '段落' : scope === 'sentence' ? '句子' : '短语'}翻译`),
+      createElement('p', 'annotation-source', text),
+      createElement('p', 'annotation-translation', result.translation)
+    ]);
+```
+
+漏掉这一处的后果：选区翻译之后 `state.annotation` 仍是上一个单词的批注，`refreshSavedWordUi` 会把翻译结果覆盖成单词批注（执行时由实现者发现并修正）。
+
 - [ ] **Step 2: 重写 renderWordAnnotation 的按钮区**
 
 把 `renderWordAnnotation` 签名改为：
@@ -730,18 +742,21 @@ Expected：7 条全部符合；任一条不符时先修该条再继续。
 
 - [ ] **Step 1: 加断言**
 
-在 `test/e2e.py` 的 `page.get_by_role("button", name="开始精读").click()` 之后插入：
+先把握手改成带重试断言的导入：`from playwright.sync_api import expect, sync_playwright`。
+
+在 `test/e2e.py` 的 `page.get_by_role("button", name="开始精读").click()` 之后插入（**必须用 `expect()` 而不是 `count()`/`is_visible()`**：`.save-word` 的点击处理器是 `await saveWordFromLookup(...)` 的异步流程，非重试断言会 flaky）：
 
 ```python
+        # 需要可用的 /api/translate（DeepSeek Key + 网络）；离线环境下这几步会超时失败。
         page.locator(".word-token").first.click()
         page.locator(".save-word").click()
-        assert page.locator(".save-word.is-saved").count() == 1
-        assert page.locator(".word-detail-link").is_visible()
+        expect(page.locator(".save-word.is-saved")).to_have_count(1)
+        expect(page.locator(".word-detail-link")).to_be_visible()
         page.locator(".word-detail-link").click()
-        assert page.locator("#word-detail-view").is_visible()
-        assert page.get_by_role("button", name="返回原文").is_visible()
+        expect(page.locator("#word-detail-view")).to_be_visible()
+        expect(page.get_by_role("button", name="返回原文")).to_be_visible()
         page.get_by_role("button", name="返回原文").click()
-        assert page.locator("#reader-view").is_visible()
+        expect(page.locator("#reader-view")).to_be_visible()
 ```
 
 - [ ] **Step 2: 运行（需要 Playwright）**
@@ -1254,6 +1269,8 @@ git commit -m "refactor(wordbook): 来源筛选改由 word-sources 负责"
 
 ## Task B6: 筛选控件骨架与样式
 
+> **注意：B6 不能单独落地。** 一旦从 `index.html` 移除 `<select id="word-source-filter">`，`app.js` 里 `elements.wordSourceFilter.addEventListener('change', ...)`（模块顶层）与 `renderWordbook()` 里的 `.value` 读取会立刻抛 `TypeError`，整页初始化中断。B6 必须与 B7、B8 在同一个提交里完成（执行时即如此处理）。
+
 **Files:**
 - Modify: `public/index.html`
 - Modify: `public/styles.css`
@@ -1648,6 +1665,43 @@ Expected: 无断言错误；本机未装 Playwright 时以 Task B9 手工清单�
 git add test/e2e.py
 git commit -m "test(e2e): 覆盖来源筛选面板开合"
 ```
+
+---
+
+## 执行记录（2026-10-09 完成）
+
+按 Subagent-Driven 方式执行：每个单元由独立 subagent 实现，随后经规格一致性 + 代码质量两阶段审查（发现的问题由后续 subagent 修复并复验）。
+
+提交（基线 `fbd0a0c` → 最终 `c12f520`，13 个提交，10 个文件 +750/-59）：
+
+| commit | 内容 |
+| --- | --- |
+| `5fa2ce5` | A1 已收录词形判定 |
+| `094c22d` | A2 视图返回目标解析 |
+| `54de268` | 补齐词形归一化与返回目标的回归覆盖（审查发现的测试缺口） |
+| `96334d2` | A3–A6 详情入口、返回关系与已收录状态 |
+| `74d54a3` | 统一入库词形并清理审查遗留问题 |
+| `40cf447` | A7 已收录反馈样式 + A9 e2e 断言 |
+| `427fcbe` `7e1e5e0` `f0d8dec` `4e722c0` | B1–B4 来源选择模型、来源树、命中过滤与三态、按钮文案 |
+| `88f05dc` | B5 `filterWords` 交出 `sourceId` |
+| `a5a7354` | B6+B7+B8 文件夹式来源多选面板（控件、索引缓存、面板渲染） |
+| `c12f520` | e2e 修正失效选择器并覆盖筛选面板 |
+
+执行过程中对计划的修正（文档已同步）：
+
+1. A5 的面板写入点实际是 **6 处**（含 `translateText`），漏改会让选区翻译被残留单词批注覆盖。
+2. B6 不能单独落地，必须与 B7、B8 同一个提交完成（否则 `app.js` 顶层引用已移除的 `<select>` 直接抛错）。
+3. A9 的 e2e 断言必须用 `expect()` 重试式写法，`count()`/`is_visible()` 会因保存流程是异步而 flaky。
+4. e2e 里两个早已失效的选择器 `#word-source-filter`、`.wordbook-item` 一并修正。
+5. 点来源筛选的「×」清空时不再顺手关闭面板（外部点击处理器排除 `#word-source-clear`）。
+
+验证方式与结果：
+
+- `node test/*.test.js` 逐文件运行：12 个文件、85 项全部通过（`node --test` 在本沙箱因 `spawn EPERM` 不可用）。
+- 行为验证用「仓库外临时目录里的假 DOM 探针」（自建 `document`/`window`/`localStorage`/`indexedDB` 桩，import 真实 `app.js`）：
+  - 详情链路探针 8/8 通过，且在修复前的代码上恰好 3 条失败（证明探针能捕获该缺陷）；
+  - 来源筛选探针 25/25 通过，并用「把 `index.html` 回退成旧控件」的反向对照复现了初始化 `TypeError`。
+- **未验证**：真实浏览器里的布局、滚动恢复、暗色主题与动画观感（本机无 Playwright）；`test/e2e.py` 只做了静态审计与 `ast.parse` 语法校验，未实际运行。
 
 ---
 
