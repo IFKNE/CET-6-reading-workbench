@@ -190,3 +190,18 @@ test('选中的文章已从单词本消失时给出明确兜底文案', () => {
   const selection = { all: false, articleIds: ['a404'], includeUnlinked: false };
   assert.equal(describeSelection(selection, emptyTree, []).label, '文章已不在精读库');
 });
+
+test('文章还在精读库里、只是没有单词时用库里的标题', () => {
+  // 用户选中过「长篇一」（a3），随后把这篇文章的最后一个单词从单词本移除：
+  // 树里已经没有 a3，但精读库里它还在。
+  const emptyTree = createSourceTree([], [], []);
+  const selection = { all: false, articleIds: ['a3'], includeUnlinked: false };
+  const libraryArticles = [{ id: 'a3', title: '长篇一', folderId: '' }];
+  assert.equal(describeSelection(selection, emptyTree, [], libraryArticles).label, '长篇一');
+});
+
+test('文章既不在树里也不在精读库里才用兜底文案', () => {
+  const emptyTree = createSourceTree([], [], []);
+  const selection = { all: false, articleIds: ['a404'], includeUnlinked: false };
+  assert.equal(describeSelection(selection, emptyTree, [], []).label, '文章已不在精读库');
+});

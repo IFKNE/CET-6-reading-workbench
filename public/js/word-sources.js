@@ -126,8 +126,7 @@ function findArticle(tree, articleId) {
   return pools.find((article) => article.id === articleId);
 }
 
-// 文章可能因为单词被删光而不在来源树里，退回条目 sources 上保存的标题。
-// 注：这是防御性兜底——当前调用路径下树与 entries 同源，能进树的文章必然在 entries 里，
+// 防御性兜底：当前调用路径下树与 entries 同源，能进树的文章必然在 entries 里，
 // 因此正常永远查不到这里；只有拿旧快照（或不同一批数据）构建的树配新 entries 时才可能命中。
 function findStoredTitle(entries, articleId) {
   for (const entry of Array.isArray(entries) ? entries : []) {
@@ -137,8 +136,21 @@ function findStoredTitle(entries, articleId) {
   return '';
 }
 
+// 文章单词被删光后就不在来源树里了，但精读库本身还在，用库里的标题补上。
+function findLibraryTitle(articles, articleId) {
+  const matched = (Array.isArray(articles) ? articles : []).find((article) => String(article?.id ?? '') === articleId);
+  return matched?.title ? String(matched.title) : '';
+}
+
+function articleTitle(tree, entries, articles, articleId) {
+  return findArticle(tree, articleId)?.title
+    || findLibraryTitle(articles, articleId)
+    || findStoredTitle(entries, articleId)
+    || '文章已不在精读库';
+}
+
 // 侧栏「项」按用户视角折叠：选满的文件夹算一项，其内文章不再单独计数。
-export function describeSelection(selection, tree, entries) {
+export function describeSelection(selection, tree, entries, articles = []) {
   if (!selection || selection.all) return { label: '全部单词', detail: '', active: false };
   const articleIds = (selection.articleIds ?? []).map(String);
   const includeUnlinked = Boolean(selection.includeUnlinked);
@@ -151,9 +163,7 @@ export function describeSelection(selection, tree, entries) {
   const covered = new Set(fullFolders.flatMap((folder) => folder.articleIds));
   const names = [
     ...fullFolders.map((folder) => folder.name),
-    ...articleIds
-      .filter((id) => !covered.has(id))
-      .map((id) => findArticle(tree, id)?.title || findStoredTitle(entries, id) || '文章已不在精读库')
+    ...articleIds.filter((id) => !covered.has(id)).map((id) => articleTitle(tree, entries, articles, id))
   ];
   if (includeUnlinked) names.push('未关联文章');
   const label = names.length === 1 ? names[0] : names.length ? `${names[0]} +${names.length - 1} 项` : '全部单词';

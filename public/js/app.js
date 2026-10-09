@@ -882,7 +882,7 @@ function leaveWordDetail(targetView) {
 }
 
 function renderSourceFilter(tree = createSourceTree(state.entries, state.libraryIndex.articles, state.libraryIndex.folders)) {
-  const described = describeSelection(state.sourceSelection, tree, state.entries);
+  const described = describeSelection(state.sourceSelection, tree, state.entries, state.libraryIndex.articles);
   elements.sourceLabel.textContent = `来源：${described.label}`;
   elements.sourceDetail.textContent = described.detail;
   elements.sourceTrigger.classList.toggle('is-filtered', described.active);
@@ -996,7 +996,7 @@ function renderWordbook() {
       ? '这里还没有单词。阅读时点击任意单词，再选择“加入单词本”。'
       : state.sourceSelection.all
         ? '当前搜索或状态筛选下没有单词。'
-        : `“${describeSelection(state.sourceSelection, tree, state.entries).label}”下没有匹配的单词。`;
+        : `“${describeSelection(state.sourceSelection, tree, state.entries, state.libraryIndex.articles).label}”下没有匹配的单词。`;
     elements.wordbookList.append(createElement('p', 'book-empty', message));
     return;
   }
