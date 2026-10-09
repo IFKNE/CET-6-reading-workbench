@@ -37,6 +37,11 @@ all                    → 全部单词
 
 一个词在多篇文章出现过时，命中任一篇即显示一次。
 
+两条由选择模型决定的行为：
+
+- **`all` 状态下的勾选 = 只看这一项**：`all` 为真时所有文件夹显示为已勾（它们的词确实都在显示中），此时点某个文件夹/文章/未关联文章，结果是「只看这一项」并进入显式多选，而不是从全部里排除它（本项目不做排除模型）。点「全部单词」回到全部。
+- **取消最后一个选择 = 回到「全部单词」**：不允许出现「一项都没选」的空选择状态，避免筛选后面板空转。
+
 ### 2. 归属规则（每个单词恰好一条路径）
 
 - **各文件夹**：文章 `folderId === 文件夹 id`。
@@ -71,12 +76,12 @@ all                    → 全部单词
 ### 6. 模块与测试
 
 - 新增 `public/js/word-sources.js`（纯函数，无 DOM）：
-  - `createSourceTree(entries, articles, folders)` → `{ folders: [{ id, name, articleIds, count, articles: [{ id, title, count }] }], unfiled: { articleIds, count, articles }, unlinked: { count }, total }`
-  - `toggleAll(selection)` / `toggleArticle(selection, articleId)` / `toggleFolder(selection, tree, folderId)` / `toggleUnlinked(selection)` / `clearSelection()`
-  - `describeSelection(selection, tree)` → `{ label, detail, active }`
-  - `folderCheckState(tree, folderId, selection)` → `'all' | 'some' | 'none'`
-  - `filterEntriesBySource(entries, selection, tree)`
-- `public/js/wordbook.js` 的 `filterWords` 只保留搜索词、状态与标签筛选；来源筛选由 `filterEntriesBySource` 先行完成（`filterWords` 的 `sourceId` 选项移除，对应测试改写为同样的语义）。
+  - `createSourceTree(entries, articles, folders)` → `{ folders: [{ id, name, articleIds, articles: [{ id, title, count }], count }], unfiled: { articleIds, articles, count }, unlinked: { count }, total }`
+  - 选择模型：`selectAll()` / `clearSelection()` / `toggleArticle(selection, articleId)` / `toggleFolder(selection, tree, folderId)` / `toggleUnfiled(selection, tree)` / `toggleUnlinked(selection)`
+  - `groupCheckState(articleIds, selection)` → `'all' | 'some' | 'none'`（文件夹、未归档、文章行共用）
+  - `filterEntriesBySource(entries, selection)`
+  - `describeSelection(selection, tree, entries)` → `{ label, detail, active }`
+- `public/js/wordbook.js` 的 `filterWords` 只保留搜索词、状态与标签筛选（搜索词仍按现有行为匹配单词、释义与来源文章标题）；来源筛选由 `filterEntriesBySource` 先行完成（`filterWords` 的 `sourceId` 选项移除，对应测试改写为同样的语义）。
 - `node --test` 覆盖：归属唯一性（每个条目恰好落在一条路径）、未归档与未关联分支、文章被删、文件夹被删后单词归位、多来源词的并集去重、文件夹三态、与搜索/状态/标签筛选取交集、`describeSelection` 各分支文案。
 
 ## 范围与约束
