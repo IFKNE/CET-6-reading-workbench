@@ -238,9 +238,9 @@ function renderKeyVocabulary({ animateWord = '' } = {}) {
     return;
   }
   const saved = savedWordKeys(state.entries);
-  const animateKey = String(animateWord ?? '').trim().toLowerCase();
+  const animateKey = wordKey(animateWord);
   vocabulary.slice(0, 24).forEach((item) => {
-    const key = String(item.word ?? '').trim().toLowerCase();
+    const key = wordKey(item.word);
     const isSaved = saved.has(key);
     const classes = ['key-word-card'];
     if (isSaved) classes.push('is-saved');
@@ -262,7 +262,7 @@ function renderKeyVocabulary({ animateWord = '' } = {}) {
 
 // 加入/移除单词后，面板、重点词卡片、单词本列表必须看到同一份状态。
 function refreshSavedWordUi(word, { animate = false } = {}) {
-  const key = String(word ?? '').trim().toLowerCase();
+  const key = wordKey(word);
   renderKeyVocabulary({ animateWord: animate ? key : '' });
   if (state.annotation && wordKey(state.annotation.word) === key) {
     renderWordAnnotation(state.annotation.data, state.annotation.word, state.annotation.context, { animateSave: animate });
