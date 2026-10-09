@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clearSelection, createSourceTree, filterEntriesBySource, groupCheckState, selectAll, toggleArticle, toggleFolder, toggleUnfiled, toggleUnlinked } from '../public/js/word-sources.js';
+import { clearSelection, createSourceTree, describeSelection, filterEntriesBySource, groupCheckState, selectAll, toggleArticle, toggleFolder, toggleUnfiled, toggleUnlinked } from '../public/js/word-sources.js';
 
 const tree = {
   folders: [
@@ -114,4 +114,28 @@ test('文件夹勾选框三态', () => {
   assert.equal(groupCheckState(['a2'], toggleArticle(selectAll(), 'a1')), 'none');
   assert.equal(groupCheckState([], selectAll()), 'none');
   assert.equal(sourceTree.folders[0].articleIds.length, 1);
+});
+
+test('未筛选时按钮显示全部单词', () => {
+  const sourceTree = createSourceTree(entries, articles, folders);
+  assert.deepEqual(describeSelection(selectAll(), sourceTree, entries), { label: '全部单词', detail: '', active: false });
+});
+
+test('选中整文件夹显示文件夹名', () => {
+  const sourceTree = createSourceTree(entries, articles, folders);
+  assert.equal(describeSelection(toggleFolder(selectAll(), sourceTree, 'f1'), sourceTree, entries).label, '听力文件夹');
+});
+
+test('多选时显示首项与其余数量', () => {
+  const sourceTree = createSourceTree(entries, articles, folders);
+  const selection = { all: false, articleIds: ['a1', 'a3'], includeUnlinked: false };
+  const described = describeSelection(selection, sourceTree, entries);
+  assert.equal(described.label, '对话一 +1 项');
+  assert.equal(described.detail, '已选 2 项 · 2 个单词');
+  assert.equal(described.active, true);
+});
+
+test('只勾未关联文章时的文案', () => {
+  const sourceTree = createSourceTree(entries, articles, folders);
+  assert.equal(describeSelection(toggleUnlinked(selectAll()), sourceTree, entries).label, '未关联文章');
 });

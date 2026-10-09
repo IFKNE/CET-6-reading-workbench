@@ -120,3 +120,31 @@ export function groupCheckState(articleIds, selection) {
   if (selected === 0) return 'none';
   return selected === ids.length ? 'all' : 'some';
 }
+
+function findArticle(tree, articleId) {
+  const pools = [...(tree?.folders ?? []).flatMap((folder) => folder.articles ?? []), ...(tree?.unfiled?.articles ?? [])];
+  return pools.find((article) => article.id === articleId);
+}
+
+export function describeSelection(selection, tree, entries) {
+  if (!selection || selection.all) return { label: '全部单词', detail: '', active: false };
+  const articleIds = (selection.articleIds ?? []).map(String);
+  const includeUnlinked = Boolean(selection.includeUnlinked);
+  const wholeFolder = (tree?.folders ?? []).find((folder) => (
+    !includeUnlinked &&
+    folder.articleIds.length > 0 &&
+    folder.articleIds.length === articleIds.length &&
+    folder.articleIds.every((id) => articleIds.includes(id))
+  ));
+  const names = articleIds.map((id) => findArticle(tree, id)?.title ?? '已删除的文章');
+  if (includeUnlinked) names.push('未关联文章');
+  const label = wholeFolder
+    ? wholeFolder.name
+    : names.length === 1
+      ? names[0]
+      : names.length
+        ? `${names[0]} +${names.length - 1} 项`
+        : '全部单词';
+  const wordCount = filterEntriesBySource(entries, selection).length;
+  return { label, detail: `已选 ${names.length} 项 · ${wordCount} 个单词`, active: true };
+}
