@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clearSelection, createSourceTree, selectAll, toggleArticle, toggleFolder, toggleUnfiled, toggleUnlinked } from '../public/js/word-sources.js';
+import { clearSelection, createSourceTree, filterEntriesBySource, groupCheckState, selectAll, toggleArticle, toggleFolder, toggleUnfiled, toggleUnlinked } from '../public/js/word-sources.js';
 
 const tree = {
   folders: [
@@ -91,4 +91,27 @@ test('文章不在精读库里时按条目里保存的标题落到未归档', ()
 test('没有单词的文件夹不出现', () => {
   const sourceTree = createSourceTree(entries, articles, folders);
   assert.equal(sourceTree.folders.some((folder) => folder.id === 'f2'), false);
+});
+
+test('多选来源取并集且不重复', () => {
+  const selection = { all: false, articleIds: ['a1', 'a3'], includeUnlinked: false };
+  assert.deepEqual(filterEntriesBySource(entries, selection).map((entry) => entry.word), ['critical', 'evidence']);
+});
+
+test('未关联文章只在勾选时命中', () => {
+  assert.deepEqual(filterEntriesBySource(entries, { all: false, articleIds: ['a1'], includeUnlinked: true }).map((entry) => entry.word), ['critical', 'evidence', 'phrase one']);
+});
+
+test('全部单词命中所有条目', () => {
+  assert.equal(filterEntriesBySource(entries, selectAll()).length, entries.length);
+});
+
+test('文件夹勾选框三态', () => {
+  const sourceTree = createSourceTree(entries, articles, folders);
+  assert.equal(groupCheckState(['a1'], selectAll()), 'all');
+  assert.equal(groupCheckState(['a1'], toggleArticle(selectAll(), 'a1')), 'all');
+  assert.equal(groupCheckState(['a1', 'a2'], toggleArticle(selectAll(), 'a1')), 'some');
+  assert.equal(groupCheckState(['a2'], toggleArticle(selectAll(), 'a1')), 'none');
+  assert.equal(groupCheckState([], selectAll()), 'none');
+  assert.equal(sourceTree.folders[0].articleIds.length, 1);
 });

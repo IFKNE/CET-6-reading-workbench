@@ -100,3 +100,23 @@ export function toggleUnlinked(selection) {
   const base = explicitBase(selection);
   return settle({ ...base, includeUnlinked: !base.includeUnlinked });
 }
+
+export function filterEntriesBySource(entries, selection) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (!selection || selection.all) return list;
+  const ids = new Set((selection.articleIds ?? []).map(String));
+  return list.filter((entry) => {
+    const sourceIds = Object.keys(entry?.sources ?? {});
+    if (sourceIds.some((id) => ids.has(id))) return true;
+    return Boolean(selection.includeUnlinked) && sourceIds.length === 0;
+  });
+}
+
+export function groupCheckState(articleIds, selection) {
+  const ids = Array.isArray(articleIds) ? articleIds : [];
+  if (!selection || selection.all) return ids.length ? 'all' : 'none';
+  if (!ids.length) return 'none';
+  const selected = ids.filter((id) => (selection.articleIds ?? []).includes(id)).length;
+  if (selected === 0) return 'none';
+  return selected === ids.length ? 'all' : 'some';
+}
