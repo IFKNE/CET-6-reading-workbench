@@ -1697,12 +1697,25 @@ git commit -m "test(e2e): 覆盖来源筛选面板开合"
 | `fa21cc4` | 来源筛选「项」按用户视角折叠计数 |
 | `df8fd63` | 让文件夹折叠与兜底文案的断言真正生效（含变异验证） |
 | `8e5212b` | 来源标签按精读库补齐文章标题（修掉「文章已不在精读库」误报） |
+| `16e35d5` | 用户实测报「筛选的文件夹打不开」：面板内部点击被误判成外部点击 |
 | `36398ad` | 文档同步：规范、计划、已知问题、执行记录 |
 
 整体审查（fresh eyes 的最终审查 + 修复后复核）发现并修掉的两个阻塞项（都是 DOM 接线层零测试才漏过的）：
 
 - `switchView` 只在「离开详情页」时保护 `state.viewOrigin`，**进入**详情页时仍会覆盖它 → 「我的精读 → 单词本 → 详情 → 返回单词本 → ×」落到原文页。修法：进出详情页都不覆盖来源。
 - 详情页按 `item.word === state.detailWord` 精确匹配，而其它地方都归一化；更糟的是 `enrichWordEntry` 展开 AI 回包会**改写条目词形**，生成详细档案后详情页当场显示「没有找到这个单词」。修法：`wordKey()` 唯一归一化入口 + `enrichWordEntry` 保住条目自身词形。
+
+### 用户实测反馈的缺陷（`16e35d5`）
+
+现象：在来源筛选面板里点文件夹行的 `›` 打不开文件夹（面板直接消失），面包屑返回、「本文件夹全选/全不选」、「清空来源筛选」同样。
+
+根因：`renderSourcePanel()` 用 `replaceChildren` 整块重建面板，而 `document` 上的「点面板外关闭」处理器用 `elements.sourcePanel.contains(event.target)` 判断；被点的按钮在事件冒泡到 `document` 之前就已脱离文档，`contains()` 对脱离的 target 返回 `false` → 误判成外部点击并关闭面板。
+
+修法（`public/js/app.js`，两处互为保险）：面板自身 `click` 监听 `stopPropagation()`；`document` 的判断改用派发时固化的 `event.composedPath()`（无 `composedPath` 的环境退化为 `[event.target]`，否则触发按钮会被当成外部点击）。
+
+附带纠正：勾选框**从来不受影响** —— HTML 规范里 `input` 的 activation behavior 在 click 派发结束之后才执行，click 冒泡时面板还完整，随后才 `change` 触发重建。
+
+验证：探针的假 DOM 原先保留了被摘掉节点的 `parentNode` 链，`contains()` 恒为真，所以这类 bug 全被掩盖；把探针补上「派发时冻结传播路径 + 摘除时清空 parentNode」后复现（`source-folder-open` 修复前 7/2，失败项正是 `›` 与面包屑返回），修复后 9/0，且其余场景全绿。
 
 ### 已知问题（接受并记录，不阻塞）
 
