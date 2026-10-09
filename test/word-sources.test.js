@@ -141,9 +141,19 @@ test('只勾未关联文章时的文案', () => {
   assert.equal(describeSelection(toggleUnlinked(selectAll()), sourceTree, entries).label, '未关联文章');
 });
 
-test('勾满一个文件夹只算一项', () => {
-  const sourceTree = createSourceTree(entries, articles, folders);
-  const described = describeSelection(toggleFolder(selectAll(), sourceTree, 'f1'), sourceTree, entries);
+test('勾满一个含两篇文章的文件夹只算一项', () => {
+  const folderEntries = [
+    { word: 'critical', sources: { a1: { title: '对话一' } } },
+    { word: 'evidence', sources: { a2: { title: '对话二' } } }
+  ];
+  const folderArticles = [
+    { id: 'a1', title: '对话一', folderId: 'f1' },
+    { id: 'a2', title: '对话二', folderId: 'f1' }
+  ];
+  const folderList = [{ id: 'f1', name: '听力文件夹' }];
+  const sourceTree = createSourceTree(folderEntries, folderArticles, folderList);
+  const selection = { all: false, articleIds: ['a1', 'a2'], includeUnlinked: false };
+  const described = describeSelection(selection, sourceTree, folderEntries);
   assert.equal(described.label, '听力文件夹');
   assert.equal(described.detail, '已选 1 项 · 2 个单词');
 });
@@ -175,9 +185,8 @@ test('文件夹加它之外的文章算两项', () => {
   assert.equal(described.detail, '已选 2 项 · 2 个单词');
 });
 
-test('文章单词被移除后仍显示条目里保存的标题', () => {
-  const leftWithNothing = [{ word: 'critical', sources: { a1: { title: '对话一' }, a3: { title: '长篇一' } } }];
-  const sourceTree = createSourceTree(leftWithNothing, articles, folders);
-  const selection = { all: false, articleIds: ['a3'], includeUnlinked: false };
-  assert.equal(describeSelection(selection, sourceTree, leftWithNothing).label, '长篇一');
+test('选中的文章已从单词本消失时给出明确兜底文案', () => {
+  const emptyTree = createSourceTree([], [], []);
+  const selection = { all: false, articleIds: ['a404'], includeUnlinked: false };
+  assert.equal(describeSelection(selection, emptyTree, []).label, '文章已不在精读库');
 });

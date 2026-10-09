@@ -127,6 +127,8 @@ function findArticle(tree, articleId) {
 }
 
 // 文章可能因为单词被删光而不在来源树里，退回条目 sources 上保存的标题。
+// 注：这是防御性兜底——当前调用路径下树与 entries 同源，能进树的文章必然在 entries 里，
+// 因此正常永远查不到这里；只有拿旧快照（或不同一批数据）构建的树配新 entries 时才可能命中。
 function findStoredTitle(entries, articleId) {
   for (const entry of Array.isArray(entries) ? entries : []) {
     const title = entry?.sources?.[articleId]?.title;
