@@ -61,7 +61,7 @@
 - 面板按钮：`.save-word.is-saving`（按压 + 涟漪）→ `.save-word.is-saved`（✓ 与一次 pop）。
 - 本篇重点词卡片：`.key-word-card.is-saved` 与 `.key-word-card-check` 徽标（scale-in 一次），配色与未收录区分。
 - 加入成功后统一 `refreshSavedWordUi()`：重渲染面板、重点词卡片、单词本列表，并写状态栏文案。
-- 动画只在「未收录 → 已收录」的真实转变时播放；已收录的词重复触发不会重复插入条目（仍会更新该条目），但不再播放动画。
+- 动画只在「未收录 → 已收录」的真实转变时播放；已收录的词重复触发不会重复插入条目，但仍会刷新该条目的 `savedAt` 与来源 `recordedAt`（只是不再播放动画）。
 - 所有动画在 `@media (prefers-reduced-motion: reduce)` 下退化为纯状态变化，沿用 `.archive-spinner` 的现有做法。
 
 ### 6. 详情页

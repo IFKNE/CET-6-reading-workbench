@@ -67,7 +67,7 @@ all                    → 全部单词
 - 多项：`来源：听力原文 +2 项`。
 - `项` 按用户视角折叠计数：**选满的文件夹算 1 项**（名字用文件夹名），其内文章不再单独计数；未被选满文件夹覆盖的文章各算 1 项；`未关联文章` 算 1 项。因此勾一个含 2 篇文章的文件夹显示「已选 1 项」，勾两个文件夹显示「文件夹A +1 项」。
 - 有筛选时显示副标签 `已选 N 项 · M 个单词`（M = 命中来源的子集大小，与搜索词、状态筛选无关），并提供 `×` 一键清空。
-- 选中的文章后来从单词本消失（该篇的单词全被移除）时，按钮显示兜底文案 `文章已不在精读库`，`×` 或「清空来源筛选」即可恢复。
+- 文章标题的查找顺序：来源树（有单词的文章，最准）→ **精读库索引**（文章还在、只是单词被移光）→ 条目 `sources` 里保存的标题 → 最后才回落 `文章已不在精读库`。`×` 或「清空来源筛选」可随时恢复。
 
 ### 5. 数据同步
 
@@ -83,7 +83,7 @@ all                    → 全部单词
   - 选择模型：`selectAll()` / `clearSelection()` / `toggleArticle(selection, articleId)` / `toggleFolder(selection, tree, folderId)` / `toggleUnfiled(selection, tree)` / `toggleUnlinked(selection)`
   - `groupCheckState(articleIds, selection)` → `'all' | 'some' | 'none'`（文件夹、未归档、文章行共用）
   - `filterEntriesBySource(entries, selection)`
-  - `describeSelection(selection, tree, entries)` → `{ label, detail, active }`
+  - `describeSelection(selection, tree, entries, articles)` → `{ label, detail, active }`（`articles` 为精读库索引，用于文章还在库里、但单词已被移光时取标题）
 - `public/js/wordbook.js` 的 `filterWords` 只保留搜索词、状态与标签筛选（搜索词仍按现有行为匹配单词、释义与来源文章标题）；来源筛选由 `filterEntriesBySource` 先行完成（`filterWords` 的 `sourceId` 选项移除，对应测试改写为同样的语义）。
 - `node --test` 覆盖：归属唯一性（每个条目恰好落在一条路径）、未归档与未关联分支、文章被删、文件夹被删后单词归位、多来源词的并集去重、文件夹三态、与搜索/状态/标签筛选取交集、`describeSelection` 各分支文案。
 
