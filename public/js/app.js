@@ -1330,8 +1330,17 @@ elements.sourceTrigger.addEventListener('click', () => {
   if (elements.sourcePanel.hidden) openSourcePanel(); else closeSourcePanel();
 });
 elements.sourceClear.addEventListener('click', () => applySourceSelection(clearSelection(), ''));
+// 面板内部的点击会重建面板（按钮/勾选框随之脱离文档），
+// 若让它冒泡到 document 的“点外部关闭”处理器，contains() 会因为 target 已脱离而误判成外部点击。
+elements.sourcePanel.addEventListener('click', (event) => event.stopPropagation());
 document.addEventListener('click', (event) => {
-  if (!elements.sourcePanel.hidden && !elements.sourcePanel.contains(event.target) && !elements.sourceTrigger.contains(event.target) && !elements.sourceClear.contains(event.target)) closeSourcePanel();
+  if (elements.sourcePanel.hidden) return;
+  // composedPath() 在派发时就固定，不受“面板重建导致 target 脱离文档”影响。
+  // 没有 composedPath 的环境退化成「只认 target」（target 本就是路径的第一项），
+  // 否则空数组会把触发按钮自身的点击也当成外部点击，导致刚打开就被关掉。
+  const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
+  if (path.includes(elements.sourcePanel) || path.includes(elements.sourceTrigger) || path.includes(elements.sourceClear)) return;
+  closeSourcePanel();
 });
 elements.wordQuickFilters.addEventListener('click', (event) => {
   const button = event.target.closest('button');

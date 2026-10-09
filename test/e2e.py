@@ -59,6 +59,22 @@ def main():
         expect(page.locator("#word-source-label")).to_have_text("来源：全部单词")
         # 点“×”清空筛选后面板必须保持打开（#word-source-clear 在面板与 trigger 之外）。
         expect(page.locator("#word-source-panel")).to_be_visible()
+        # 回归：面板内部的点击会同步重建整块面板（renderSourcePanel 里的 replaceChildren），
+        # 被点的元素在事件冒泡到 document 之前就已脱离文档；document 上的“点面板外关闭”处理器
+        # 若用 contains(event.target)，会因为 target 已脱离而误判成外部点击，把面板立刻关掉
+        # （用户报的“点文件夹的 › 打不开”就是这个）。这里用面板内部的「清空来源筛选」按钮守这条：
+        # 它的 click 处理器同样走 applySourceSelection → renderWordbook → renderSourceFilter →
+        # renderSourcePanel，重建面板的时机与 › 完全一致。
+        page.locator("#word-source-panel .source-clear-all").click()
+        expect(page.locator("#word-source-panel")).to_be_visible()
+        # 文件夹层（点 › 进入 / 点面包屑返回）无法在下面这组夹具里覆盖：本测试只往 localStorage
+        # 种了 1 个「没有来源」的单词，而且从未保存过精读文章（IndexedDB 为空），来源树根层因此
+        # 只有「全部单词 / 未关联文章」两行，没有可点的 .source-enter。要覆盖它，需要先有文件夹
+        # 数据（页面上保存一篇文章进文件夹，或直接种 IndexedDB 的 articles/folders）。
+        # 该路径目前由带文件夹数据的探针场景覆盖（TEMP 下 cet6probe-bubble 的 source-folder-open：
+        # 点 › → 面板仍可见 → 面包屑可见 → 返回根层）。下面这条断言是“夹具前提”的守卫：
+        # 一旦这里补上了带文件夹的文章，它会失败，提醒你把上面那四步真正补进来。
+        assert page.locator("#word-source-panel .source-enter").count() == 0
         page.keyboard.press("Escape")
         expect(page.locator("#word-source-panel")).to_be_hidden()
         assert page.locator(".wordbook-row").count() == 1
