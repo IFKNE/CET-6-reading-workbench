@@ -13,23 +13,28 @@ export function addOrUpdateWord(entries, entry) {
   return [{ ...existing, ...entry, word: key, sources }, ...next];
 }
 
+// 词形归一化的唯一入口：库里比较、界面比较、入库词形都走这里。
+export function wordKey(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
 export function savedWordKeys(entries) {
   const keys = new Set();
   for (const entry of Array.isArray(entries) ? entries : []) {
-    const key = String(entry?.word ?? '').trim().toLowerCase();
+    const key = wordKey(entry?.word);
     if (key) keys.add(key);
   }
   return keys;
 }
 
 export function isWordSaved(entries, word) {
-  const key = String(word ?? '').trim().toLowerCase();
+  const key = wordKey(word);
   return Boolean(key) && savedWordKeys(entries).has(key);
 }
 
 // 条目实际入库的词形：AI 给出的词元优先，统一小写去空白，落库与界面刷新共用这一处。
 export function resolveStoredWordForm(data, fallbackWord) {
-  return String(data?.word || fallbackWord || '').trim().toLowerCase();
+  return wordKey(data?.word || fallbackWord);
 }
 
 export function createMarkdown(entries, exportedAt) {

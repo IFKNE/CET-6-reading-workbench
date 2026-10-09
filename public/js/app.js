@@ -1,5 +1,5 @@
 import { splitParagraphs, tokenizeParagraph, classifySelection } from './text.js';
-import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, isWordSaved, resolveStoredWordForm, savedWordKeys } from './wordbook.js';
+import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, isWordSaved, resolveStoredWordForm, savedWordKeys, wordKey } from './wordbook.js';
 import { requestTranslation } from './api.js';
 import { createArticleKey, createWarmupBatches, indexVocabulary, mergeVocabulary } from './article-cache.js';
 import { createArticleRecord, countWordInArticle, dedupeArticles, restoreArticleState, updateArticleMetadata } from './article-model.js';
@@ -140,7 +140,7 @@ function savePrestudyCache(cache) {
 }
 
 function normalizeWord(word) {
-  return word.toLowerCase();
+  return wordKey(word);
 }
 
 function setReaderStatus(message) {
@@ -177,7 +177,9 @@ function switchView(view) {
     state.scrollMemory[previousView] = window.scrollY;
     // 详情页是叶子视图：返回时不覆盖“来时的来源”，
     // 否则 原文 → 单词本 → 详情 → 返回单词本 → × 会又跳回详情。
-    if (previousView !== 'word-detail') state.viewOrigin = previousView;
+    // 进入详情页也不覆盖来源，详情页自己的来源记在 state.detailOrigin，
+    // 否则 我的精读 → 单词本 → 详情 会把 viewOrigin 写成 'wordbook'，× 就落错页。
+    if (previousView !== 'word-detail' && view !== 'word-detail') state.viewOrigin = previousView;
   }
   state.view = view;
   elements.pasteView.hidden = view !== 'paste';
@@ -262,7 +264,7 @@ function renderKeyVocabulary({ animateWord = '' } = {}) {
 function refreshSavedWordUi(word, { animate = false } = {}) {
   const key = String(word ?? '').trim().toLowerCase();
   renderKeyVocabulary({ animateWord: animate ? key : '' });
-  if (state.annotation && String(state.annotation.word ?? '').trim().toLowerCase() === key) {
+  if (state.annotation && wordKey(state.annotation.word) === key) {
     renderWordAnnotation(state.annotation.data, state.annotation.word, state.annotation.context, { animateSave: animate });
   }
   renderWordbook();
@@ -801,7 +803,7 @@ async function saveWord(entry) {
 }
 
 function updateWordEntry(word, changes) {
-  state.entries = state.entries.map((entry) => entry.word === word ? { ...entry, ...changes } : entry);
+  state.entries = state.entries.map((entry) => wordKey(entry.word) === wordKey(word) ? { ...entry, ...changes } : entry);
   localStorage.setItem(storageKeys.wordbook, JSON.stringify(state.entries));
   if (state.view === 'word-detail') renderWordDetail();
   else renderWordbook();
@@ -811,15 +813,16 @@ async function enrichWordEntry(entry) {
   const requestKey = `archive:${normalizeWord(entry.word)}`;
   const request = aiRequests.run(requestKey, () => requestTranslation({ scope: 'word', text: entry.word, context: entry.context || '' }));
   if (!request) return;
-  if (state.view === 'word-detail' && state.detailWord === entry.word) renderWordDetail();
+  if (state.view === 'word-detail' && wordKey(state.detailWord) === wordKey(entry.word)) renderWordDetail();
   try {
     const result = await request;
-    updateWordEntry(entry.word, { ...result.data, learningStatus: entry.learningStatus ?? 'unknown', sources: entry.sources ?? {} });
+    // word 写在 ...result.data 之后：AI 回包里的原词大小写/空白不可信，条目自己的词形优先。
+    updateWordEntry(entry.word, { ...result.data, word: wordKey(entry.word), learningStatus: entry.learningStatus ?? 'unknown', sources: entry.sources ?? {} });
     setReaderStatus(`“${entry.word}” 的详细档案已生成`);
   } catch (error) {
     setReaderStatus(error.message);
   } finally {
-    if (state.view === 'word-detail' && state.detailWord === entry.word) renderWordDetail();
+    if (state.view === 'word-detail' && wordKey(state.detailWord) === wordKey(entry.word)) renderWordDetail();
   }
 }
 
@@ -865,7 +868,7 @@ function renderArchiveBlock(entry) {
 }
 
 function openWordDetail(word, origin) {
-  state.detailWord = String(word ?? '').trim().toLowerCase();
+  state.detailWord = wordKey(word);
   state.detailOrigin = origin === 'reader' ? 'reader' : 'wordbook';
   state.scrollMemory['word-detail'] = 0;
   switchView('word-detail');
@@ -1023,7 +1026,8 @@ function renderWordbook() {
 }
 
 function renderWordDetail() {
-  const entry = state.entries.find((item) => item.word === state.detailWord);
+  const detailKey = wordKey(state.detailWord);
+  const entry = state.entries.find((item) => wordKey(item.word) === detailKey);
   elements.wordDetailContent.replaceChildren();
   if (!entry) {
     elements.wordDetailContent.append(createElement('p', 'book-empty', '没有找到这个单词，可能已被移除。'));

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, getWordContextSentence, isWordSaved, resolveStoredWordForm, savedWordKeys } from '../public/js/wordbook.js';
+import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, getWordContextSentence, isWordSaved, resolveStoredWordForm, savedWordKeys, wordKey } from '../public/js/wordbook.js';
 
 test('同一词形更新而不是重复收藏', () => {
   const first = addOrUpdateWord([], { word: 'study', meaning: '学习', partOfSpeech: 'v.', context: 'I study every day.', savedAt: '2026-10-05' });
@@ -90,4 +90,14 @@ test('入库词形以 AI 词元为准并统一小写去空白', () => {
   assert.equal(resolveStoredWordForm({}, '  Running '), 'running');
   assert.equal(resolveStoredWordForm(null, 'running'), 'running');
   assert.equal(resolveStoredWordForm({ word: '' }, 'running'), 'running');
+});
+
+test('词形归一化统一走 wordKey', () => {
+  assert.equal(wordKey('  Critical '), 'critical');
+  assert.equal(wordKey('RUN'), 'run');
+  assert.equal(wordKey(undefined), '');
+  assert.equal(wordKey(null), '');
+  assert.deepEqual([...savedWordKeys([{ word: '  Evidence ' }])], ['evidence']);
+  assert.equal(isWordSaved([{ word: '  Evidence ' }], 'evidence'), true);
+  assert.equal(resolveStoredWordForm({ word: '  Run ' }, 'running'), 'run');
 });
