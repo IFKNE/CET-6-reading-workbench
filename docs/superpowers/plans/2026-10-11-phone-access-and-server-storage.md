@@ -1102,6 +1102,56 @@ git commit -m "feat(server): 默认只监听回环地址并补环境变量样例
 
 ---
 
+## Task 6b: API 层小收口（Task 5 复核结论）
+
+**Files:** modify `server/app.js`, `test/library-api.test.js`
+
+- [ ] **Step 1: 抽出重复的空白词判定**
+
+`PUT /api/wordbook` 与 `POST /api/library/import` 现在是同一段谓词 + 同一句文案复制两遍；`07c1cfa` 那次修 `find()` 假值陷阱就得同时改两处——这正是漂移的信号。在 `server/app.js` 的模块级（`statusForError` 旁边）抽出：
+
+```js
+const WORD_REQUIRED_MESSAGE = '每个单词条目的 word 必须是非空文本。';
+
+// find() 返回的是「匹配到的元素」，元素本身是 null 时是假值，
+// 所以调用方必须判 `!== undefined`，不能写成 `if (found)`。
+function firstInvalidWordEntry(entries) {
+  return entries.find((entry) => typeof entry?.word !== 'string' || entry.word.trim().length === 0);
+}
+```
+
+两个 handler 改成：
+
+```js
+    if (firstInvalidWordEntry(entries) !== undefined) return res.status(400).json({ error: WORD_REQUIRED_MESSAGE });
+```
+
+```js
+    if (firstInvalidWordEntry(wordbook) !== undefined) return res.status(400).json({ error: WORD_REQUIRED_MESSAGE });
+```
+
+- [ ] **Step 2: 让 `POST /api/wordbook.docx` 也走统一状态码规则**
+
+它是唯一还用裸 `res.status(500)` 的路由（统一规则已经在 Task 4 建立）：
+
+```js
+    } catch (error) {
+      return res.status(statusForError(error, 500)).json({ error: error.message || 'Word 文档生成失败。' });
+    }
+```
+
+- [ ] **Step 3: 运行测试 + 提交**
+
+Run: `node --test --test-isolation=none`（沙箱里不能跑 `npm test`）
+Expected: 135 个测试全绿（本次只重构与统一映射，不新增测试）
+
+```bash
+git add server/app.js test/library-api.test.js
+git commit -m "refactor(api): 抽出空白词判定并统一 Word 导出的错误映射"
+```
+
+---
+
 ## Task 7: 前端 HTTP 客户端 `library-api.js`
 
 **Files:**
