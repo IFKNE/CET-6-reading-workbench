@@ -4,6 +4,7 @@ import { requestTranslation } from './api.js';
 import { createArticleKey, createWarmupBatches, indexVocabulary, mergeVocabulary } from './article-cache.js';
 import { createArticleRecord, countWordInArticle, dedupeArticles, restoreArticleState, updateArticleMetadata } from './article-model.js';
 import { createFolder, deleteArticle, deleteFolder, getArticle, listArticles, listFolders, saveArticle } from './article-library.js';
+import { fetchWordbook, putWordbook } from './library-api.js';
 import { filterArticles, listCategories, validateFolderName } from './library-filter.js';
 import { nextTheme, readTheme } from './theme.js';
 import { resolveViewBack } from './view-nav.js';
@@ -78,7 +79,7 @@ const elements = {
 
 const state = {
   article: localStorage.getItem(storageKeys.article) ?? '',
-  entries: readWordbook(),
+  entries: [],
   highlights: new Set(readHighlights()),
   selection: null,
   contextTarget: null,
@@ -109,15 +110,6 @@ const state = {
   wordFilters: { status: '', tag: '' }
 };
 
-function readWordbook() {
-  try {
-    const data = JSON.parse(localStorage.getItem(storageKeys.wordbook) ?? '[]');
-    return Array.isArray(data) ? data : [];
-  } catch {
-    return [];
-  }
-}
-
 function readHighlights() {
   try {
     const data = JSON.parse(localStorage.getItem(storageKeys.highlights) ?? '[]');
@@ -143,6 +135,29 @@ function savePrestudyCache(cache) {
     .sort(([, left], [, right]) => String(right.createdAt).localeCompare(String(left.createdAt)))
     .slice(0, 12);
   localStorage.setItem(storageKeys.prestudyCache, JSON.stringify(Object.fromEntries(retained)));
+}
+
+let wordbookWriteChain = Promise.resolve();
+
+// 写入串行化 + 快照：旧响应晚到也不会用过期数据覆盖新数据。
+function persistWordbook() {
+  const snapshot = JSON.parse(JSON.stringify(state.entries));
+  wordbookWriteChain = wordbookWriteChain
+    .catch(() => {})
+    .then(() => putWordbook(snapshot))
+    .catch((error) => setReaderStatus(error.message));
+  return wordbookWriteChain;
+}
+
+async function loadWordbook() {
+  try {
+    const { entries } = await fetchWordbook();
+    state.entries = Array.isArray(entries) ? entries : [];
+  } catch (error) {
+    setReaderStatus(error.message);
+    state.entries = [];
+  }
+  renderWordbook();
 }
 
 function normalizeWord(word) {
@@ -852,7 +867,7 @@ async function saveWord(entry) {
     count: countWordInArticle(state.article, entry.word)
   } : undefined;
   state.entries = addOrUpdateWord(state.entries, { ...entry, savedAt, source });
-  localStorage.setItem(storageKeys.wordbook, JSON.stringify(state.entries));
+  await persistWordbook();
   renderWordbook();
   setReaderStatus(`“${entry.word}” ${alreadySaved ? '已更新到单词本' : '已加入单词本'}`);
   return { added: !alreadySaved, word: normalizeWord(entry.word) };
@@ -860,7 +875,7 @@ async function saveWord(entry) {
 
 function updateWordEntry(word, changes) {
   state.entries = state.entries.map((entry) => wordKey(entry.word) === wordKey(word) ? { ...entry, ...changes } : entry);
-  localStorage.setItem(storageKeys.wordbook, JSON.stringify(state.entries));
+  persistWordbook();
   if (state.view === 'word-detail') renderWordDetail();
   else renderWordbook();
 }
@@ -1060,7 +1075,7 @@ function renderWordbook() {
     const summary = createWordSummary(entry);
     if (entry.entryType === 'phrase') {
       const remove = createElement('button', 'remove-word', '×'); remove.type = 'button'; remove.setAttribute('aria-label', `移除短语 ${entry.word}`);
-      remove.addEventListener('click', () => { state.entries = state.entries.filter((item) => item.word !== entry.word); localStorage.setItem(storageKeys.wordbook, JSON.stringify(state.entries)); renderWordbook(); });
+      remove.addEventListener('click', () => { state.entries = state.entries.filter((item) => item.word !== entry.word); persistWordbook(); renderWordbook(); });
       elements.wordbookList.append(createElement('article', 'wordbook-row phrase-book-row', [
         createElement('strong', '', entry.word),
         createElement('span', 'word-row-meaning', entry.meaning),
@@ -1117,7 +1132,7 @@ function renderWordDetail() {
   const remove = createElement('button', 'article-delete', '从单词本移除');
   remove.type = 'button'; remove.addEventListener('click', () => {
     state.entries = state.entries.filter((item) => item.word !== entry.word);
-    localStorage.setItem(storageKeys.wordbook, JSON.stringify(state.entries));
+    persistWordbook();
     leaveWordDetail(backTarget.view);
   });
   const statuses = [['unknown', '不会'], ['fuzzy', '模糊'], ['known', '认识']];
@@ -1457,3 +1472,4 @@ elements.drawerBackdrop.remove();
 switchView('paste');
 renderWordbook();
 renderArticleLibrary();
+await loadWordbook();
