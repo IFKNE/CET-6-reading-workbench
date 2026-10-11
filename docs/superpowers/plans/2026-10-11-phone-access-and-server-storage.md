@@ -458,6 +458,20 @@ test('迁移时单词本保留服务器已有条目，只补新词', async () =>
   assert.equal(result.wordbook, 0);
   assert.deepEqual(await store.getWordbook(), [{ word: 'hello', meaning: '服务器释义', learningStatus: 'known' }]);
 });
+
+test('putWordbook 拒绝非数组，不会写出自己读不回来的文档', async () => {
+  const { dataDir, store } = await createTemporaryStore();
+  await assert.rejects(() => store.putWordbook('hello'), { message: /entries 必须是数组/ });
+  // 关键：拒绝之后文件仍然可读——否则整库会因为一次坏调用变成打不开的状态。
+  assert.deepEqual(await createStore({ dataDir }).getWordbook(), []);
+});
+
+test('deleteFolder 收到空 id 时不动「未归档」的文章', async () => {
+  const { store } = await createTemporaryStore();
+  await store.putArticle({ id: 'a1', article: 'One.', folderId: '', updatedAt: '2026-10-11T00:00:00.000Z' });
+  assert.deepEqual(await store.deleteFolder(''), { detached: 0 });
+  assert.equal((await store.getArticle('a1')).updatedAt, '2026-10-11T00:00:00.000Z');
+});
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -465,7 +479,43 @@ test('迁移时单词本保留服务器已有条目，只补新词', async () =>
 Run: `node --test test/store.test.js`
 Expected: FAIL — `store.importAll is not a function`
 
-- [ ] **Step 3: 实现 `importAll`**
+- [ ] **Step 3: 先补两处存储层自身的防护（Task 2 复核结论）**
+
+这两处都是「不写自己读不回来的数据」，与 Task 3 的改动同文件，一起做：
+
+1. `putWordbook` 开头加类型守卫。Task 2 复核实测：`putWordbook('hello')` 会把 `"wordbook": "hello"` 落盘，之后**每次 `getWordbook()` 都会报「wordbook 必须是数组」**，文件在手工修复前一直是坏的。这不是条目级校验（那属于 Task 5 的路由），而是守住 `normalizeDocument` 自己的读回不变量：
+
+```js
+    putWordbook(entries) {
+      if (!Array.isArray(entries)) throw new TypeError('entries 必须是数组。');
+      return mutate((current) => {
+        current.wordbook = structuredClone(entries);
+        return current.wordbook.length;
+      });
+    }
+```
+
+2. `deleteFolder` 加空 id 守卫，并把时间戳提到 `map` 之外（一次解绑只盖一个时间戳）：
+
+```js
+    deleteFolder(id) {
+      // 空 id 会让「未归档」（folderId === ''）的文章全部被误判成成员。
+      if (!id) return Promise.resolve({ detached: 0 });
+      return mutate((current) => {
+        current.folders = current.folders.filter((folder) => folder.id !== id);
+        const stamp = now();
+        let detached = 0;
+        current.articles = current.articles.map((article) => {
+          if (article.folderId !== id) return article;
+          detached += 1;
+          return { ...article, folderId: '', updatedAt: stamp };
+        });
+        return { detached };
+      });
+    },
+```
+
+- [ ] **Step 4: 实现 `importAll`**
 
 在 `server/store.js` 的 `putWordbook` 之后追加：
 
@@ -513,16 +563,16 @@ Expected: FAIL — `store.importAll is not a function`
     }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 5: 运行测试确认通过**
 
 Run: `node --test --test-isolation=none test/store.test.js`
-Expected: PASS（14 个 test 全绿）
+Expected: PASS（16 个 test 全绿）
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 6: 提交**
 
 ```bash
 git add server/store.js test/store.test.js
-git commit -m "feat(store): 迁移合并语义（文章按 updatedAt 取新、单词本只补新词）"
+git commit -m "feat(store): 迁移合并语义与 putWordbook/deleteFolder 防护"
 ```
 
 ---
