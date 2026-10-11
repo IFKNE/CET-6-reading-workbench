@@ -480,9 +480,9 @@ test('deleteFolder 收到空 id 时不动「未归档」的文章', async () => 
 
 test('importAll 参数不是数组时拒绝，不会写出坏文档', async () => {
   const { dataDir, store } = await createTemporaryStore();
-  // 不加守卫时会返回 { folders: 2 } 并把裸字符串写进 folders（'ab' 被当作可遍历对象）。
-  await assert.rejects(() => store.importAll({ folders: 'ab' }), { message: /folders 必须是数组/ });
-  await assert.rejects(() => store.importAll({ articles: 'x' }), { message: /articles 必须是数组/ });
+  // 与 putWordbook 的守卫一致：statusCode 挂在错误上，路由层据此回 400。
+  await assert.rejects(() => store.importAll({ folders: 'ab' }), (error) => error.statusCode === 400 && /folders 必须是数组/.test(error.message));
+  await assert.rejects(() => store.importAll({ articles: 'x' }), (error) => error.statusCode === 400 && /articles 必须是数组/.test(error.message));
   assert.deepEqual(await createStore({ dataDir }).listFolders(), []);
 });
 
@@ -642,7 +642,8 @@ git commit -m "feat(store): 迁移合并语义与 putWordbook/deleteFolder 防�
 
 **Files:**
 - Modify: `server/app.js`
-- Test: `test/library-api.test.js`
+- Create: `test/library-api.test.js`
+- Modify: `test/deepseek.test.js`（追加一条 `/api/translate` 状态码测试，见 Step 1 末尾）
 
 - [ ] **Step 1: 写失败的测试**
 
@@ -705,6 +706,10 @@ test('PUT 文章校验 id 一致、正文非空且不超长', async () => {
   const tooLong = await request(app).put('/api/library/articles/a1').send(article('a1', { article: 'x'.repeat(100001) }));
   assert.equal(tooLong.status, 400);
   assert.match(tooLong.body.error, /100000/);
+
+  // 上界是「包含」而不是「小于」：正好 100000 字符必须放行。
+  const atLimit = await request(app).put('/api/library/articles/a1').send(article('a1', { article: 'x'.repeat(100000) }));
+  assert.equal(atLimit.status, 200);
 });
 
 test('文件夹可增删，删除时返回解绑篇数', async () => {
@@ -749,6 +754,18 @@ test('存储层出错时按错误自带的状态码返回', async () => {
 });
 ```
 
+追加到 `test/deepseek.test.js` 末尾（该文件已有 `assert` / `request` / `createApp` 的导入）：
+
+```js
+test('翻译上游网络故障按 502 返回而不是 400', async () => {
+  // 复核发现：这个回归曾无测试覆盖——把 statusForError 改回 instanceof TypeError → 400，
+  // 132 个测试照样全绿。这条测试就是用来钉住它的。
+  const app = createApp({ translator: { translate: async () => { throw new TypeError('fetch failed'); } } });
+  const response = await request(app).post('/api/translate').send({ scope: 'phrase', text: 'in fact' });
+  assert.equal(response.status, 502);
+});
+```
+
 - [ ] **Step 2: 运行测试确认失败**
 
 Run: `node --test test/library-api.test.js`
@@ -767,11 +784,12 @@ import { createStore } from './store.js';
 const validScopes = new Set(['word', 'word-batch', 'phrase', 'sentence', 'paragraph', 'question', 'prestudy']);
 const MAX_ARTICLE_LENGTH = 100000;
 
-// 全文件唯一的「异常 → 状态码」规则：错误自带 statusCode 就用它（存储层的参数守卫挂 400、
-// 翻译上游错误带自己的码、缺 Key 挂 503），否则回落到调用方给的兜底值。
-// 不按 instanceof TypeError 猜——fetch 的网络故障也是 TypeError，猜错会把上游故障报成 400。
+// 全文件唯一的「异常 → 状态码」规则：错误自带 statusCode 就用它，否则回落到调用方给的兜底值。
+// 目前的产出方：server/index.js 缺 Key 时挂 503、server/store.js 参数守卫挂 400。
+// 不按 instanceof TypeError 猜——fetch 的网络故障（TypeError: fetch failed）也是 TypeError，
+// 猜错会把上游故障报成 400（这条有 test/deepseek.test.js 的「翻译上游网络故障按 502 返回」钉住）。
 function statusForError(error, fallback) {
-  return error.statusCode ?? fallback;
+  return error?.statusCode ?? fallback;
 }
 
 // 名字里写明 OrRespond：它失败时自己就把 400 写进响应了，
@@ -968,7 +986,7 @@ Expected: FAIL — 新增的 2 个 test 返回 404
     try {
       return res.json({ imported: await store.importAll({ articles, folders, wordbook }) });
     } catch (error) {
-      // 存储层的类型守卫抛的是 TypeError，statusForError 会把它算成 400（参数不合法），
+      // 存储层参数守卫挂的是 statusCode = 400，statusForError 会据此回 400，
       // 别让客户端收到一个带 400 文案的 500。
       return res.status(statusForError(error, 500)).json({ error: error.message || '数据迁移失败。' });
     }
