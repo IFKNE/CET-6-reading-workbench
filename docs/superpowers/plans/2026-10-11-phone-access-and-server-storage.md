@@ -1347,6 +1347,130 @@ git commit -m "feat(web): 新增 Library HTTP 客户端与在线状态订阅"
 
 ---
 
+## Task 7b: 客户端健壮性收口（Task 7 复核结论）
+
+**Files:** modify `public/js/library-api.js`, `test/library-api-client.test.js`
+
+- [ ] **Step 1: 超时与「200 但不是 JSON」**
+
+手机场景下这两种失败都会真实发生：连到公共 Wi-Fi 的认证门户时，任何地址都回 200 的 HTML；连接半死不活时 `fetch` 会一直悬着。前者现在抛出英文 `SyntaxError`，后者让「未连接」提示条永远不出现。
+
+```js
+const jsonHeaders = { 'Content-Type': 'application/json' };
+// 手机在弱网/认证门户下可能拿到永不完成的连接：不加超时，界面会一直以为服务器在线。
+const REQUEST_TIMEOUT_MS = 20000;
+
+const listeners = new Set();
+let online = true;
+
+// 服务器在线状态：任何请求都能翻转它，界面据此显示/隐藏“未连接”提示条。
+export function subscribeServerStatus(handler) {
+  listeners.add(handler);
+  try {
+    handler(online);
+  } catch (error) {
+    // 初次回调就抛错的话，别把这个订阅者永久留在集合里（否则提示条再也更新不了）。
+    listeners.delete(handler);
+    throw error;
+  }
+  return () => listeners.delete(handler);
+}
+
+function setOnline(next) {
+  if (next === online) return;
+  online = next;
+  listeners.forEach((handler) => handler(online));
+}
+
+async function requestJson(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(url, { ...options, signal: controller.signal });
+  } catch {
+    // 网络不可达、连接被中止（超时）都算「没连上电脑服务器」。
+    setOnline(false);
+    throw new Error('未连接到电脑服务器，数据未同步。');
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    // 能拿到响应就说明服务器在线，只是这次请求失败了。
+    setOnline(true);
+    throw new Error(body.error || '服务器请求失败，请稍后重试。');
+  }
+  setOnline(true);
+  try {
+    return await response.json();
+  } catch {
+    // 200 却不是 JSON：公共 Wi-Fi 的认证门户就长这样，必须给出能看懂的中文提示。
+    throw new Error('服务器返回了无法解析的数据，请确认访问的是电脑上的服务器地址。');
+  }
+}
+```
+
+- [ ] **Step 2: 补上被漏掉的导出与编码的测试**
+
+Task 7 的 5 个测试只覆盖了 8 个导出中的 3 个；复核证明「删掉全部 `encodeURIComponent(`」和「`deleteArticle` 改用 GET」都能让测试全绿。追加：
+
+```js
+test('其余导出打到正确的地址与方法（含需要转义的 id）', async () => {
+  await withStubFetch(
+    () => new Response(JSON.stringify({ ok: true, folder: { id: 'f/1' }, entries: [] }), { status: 200 }),
+    async (calls) => {
+      await deleteArticle('a/1 号');
+      await putFolder({ id: 'f/1', name: '真题听力' });
+      await deleteFolder('f/1');
+      await fetchWordbook();
+      await importLocalData({ articles: [], folders: [], wordbook: [] });
+      assert.deepEqual(calls.map((call) => [call.options.method ?? 'GET', call.url]), [
+        ['DELETE', '/api/library/articles/a%2F1%20%E5%8F%B7'],
+        ['PUT', '/api/library/folders/f%2F1'],
+        ['DELETE', '/api/library/folders/f%2F1'],
+        ['GET', '/api/wordbook'],
+        ['POST', '/api/library/import']
+      ]);
+    }
+  );
+});
+
+test('请求带 AbortSignal，200 但不是 JSON 时给中文提示', async () => {
+  await withStubFetch(
+    (url, options) => {
+      assert.ok(options.signal instanceof AbortSignal);
+      return new Response('<!doctype html><title>Wi-Fi 登录</title>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+    },
+    async () => {
+      await assert.rejects(() => fetchLibrary(), { message: /无法解析的数据/ });
+    }
+  );
+});
+
+test('连接被中止（超时）时按「未连接」处理并切到离线', async () => {
+  const seen = [];
+  const unsubscribe = subscribeServerStatus((online) => seen.push(online));
+  await withStubFetch(() => { throw new DOMException('Aborted', 'AbortError'); }, async () => {
+    await assert.rejects(() => fetchLibrary(), { message: /未连接到电脑服务器/ });
+  });
+  unsubscribe();
+  assert.deepEqual(seen, [true, false]);
+});
+```
+
+- [ ] **Step 3: 运行测试 + 提交**
+
+Run: `node --test --test-isolation=none test/library-api-client.test.js`
+Expected: PASS（8 个 test 全绿：5 既有 + 3 新增）
+
+```bash
+git add public/js/library-api.js test/library-api-client.test.js
+git commit -m "fix(web): 客户端加请求超时与非 JSON 响应提示，补齐导出覆盖"
+```
+
+---
+
 ## Task 8: 文章库适配层改为服务端，旧 IndexedDB 实现留存为 legacy
 
 **Files:**
