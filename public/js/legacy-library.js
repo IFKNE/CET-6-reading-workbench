@@ -1,3 +1,6 @@
+// 仅供一次性迁移使用：只从这里导入 listLegacyArticles / listLegacyFolders / readLegacyWordbook。
+// 下面的 getArticle / saveArticle / deleteArticle / createFolder / deleteFolder 是旧的 IndexedDB 实现，
+// 与 article-library.js 同名但来源不同，别再使用。
 const databaseName = 'cet6-reading-library';
 const databaseVersion = 2;
 const articleStoreName = 'articles';

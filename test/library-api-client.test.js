@@ -131,3 +131,24 @@ test('连接被中止（超时）时按「未连接」处理并切到离线', as
   unsubscribe();
   assert.deepEqual(seen, [true, false]);
 });
+
+test('单个订阅者抛错不影响其他订阅者，也不会顶掉请求错误', async () => {
+  // 与上一个 test 同理：模块级的在线状态在 test 之间保留（超时那条把它留在了离线），
+  // 先用一次成功请求复位，否则订阅时的首次回调不会发出 true。
+  await withStubFetch(
+    () => new Response(JSON.stringify({ entries: [] }), { status: 200 }),
+    () => fetchWordbook()
+  );
+  const seen = [];
+  let firstCall = true;
+  // 初次调用不抛（否则会在订阅时就被移除），之后的每次通知都抛。
+  const bad = () => { if (!firstCall) throw new Error('订阅者自己炸了'); firstCall = false; };
+  const unsubscribeBad = subscribeServerStatus(bad);
+  const unsubscribeGood = subscribeServerStatus((online) => seen.push(online));
+  await withStubFetch(() => { throw new TypeError('Failed to fetch'); }, async () => {
+    await assert.rejects(() => fetchLibrary(), { message: /未连接到电脑服务器/ });
+  });
+  unsubscribeBad();
+  unsubscribeGood();
+  assert.deepEqual(seen, [true, false]);
+});

@@ -21,15 +21,27 @@ export function subscribeServerStatus(handler) {
 function setOnline(next) {
   if (next === online) return;
   online = next;
-  listeners.forEach((handler) => handler(online));
+  listeners.forEach((handler) => {
+    // 单个订阅者抛错既不能影响其他订阅者，也不能把请求自己的错误顶掉。
+    try {
+      handler(online);
+    } catch (error) {
+      listeners.delete(handler);
+      console.error('服务器状态订阅回调抛错，已移除该订阅者。', error);
+    }
+  });
 }
 
 async function requestJson(url, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let response;
+  let body;
+  let parsed = true;
   try {
     response = await fetch(url, { ...options, signal: controller.signal });
+    // 计时器要一直活到读完响应体：认证门户可能先回响应头、再把响应体挂住。
+    body = await response.json().catch(() => { parsed = false; return null; });
   } catch {
     // 网络不可达、连接被中止（超时）都算「没连上电脑服务器」。
     setOnline(false);
@@ -38,18 +50,16 @@ async function requestJson(url, options = {}) {
     clearTimeout(timer);
   }
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
     // 能拿到响应就说明服务器在线，只是这次请求失败了。
     setOnline(true);
-    throw new Error(body.error || '服务器请求失败，请稍后重试。');
+    throw new Error(body?.error || '服务器请求失败，请稍后重试。');
   }
   setOnline(true);
-  try {
-    return await response.json();
-  } catch {
+  if (!parsed) {
     // 200 却不是 JSON：公共 Wi-Fi 的认证门户就长这样，必须给出能看懂的中文提示。
     throw new Error('服务器返回了无法解析的数据，请确认访问的是电脑上的服务器地址。');
   }
+  return body;
 }
 
 export function fetchLibrary() {
