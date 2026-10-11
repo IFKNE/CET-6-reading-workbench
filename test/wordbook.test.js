@@ -159,3 +159,27 @@ test('导出的 Markdown 列出每篇来源的原句', () => {
   assert.match(markdown, /> second sentence/);
   assert.match(markdown, /> latest sentence/);
 });
+
+test('同一篇里用不同原句重记时句子累积', () => {
+  const first = addOrUpdateWord([], { word: 'critical', context: 'First sentence.', source: { articleId: 'a1', title: '文章一', count: 1 } });
+  const second = addOrUpdateWord(first, { word: 'critical', context: 'Second sentence.', source: { articleId: 'a1', title: '文章一', count: 2 } });
+  assert.equal(second.length, 1);
+  assert.equal(second[0].sources.a1.count, 2);
+  assert.deepEqual(second[0].sources.a1.sentences, ['First sentence.', 'Second sentence.']);
+});
+
+test('重记时新条目没带标题就沿用旧标题', () => {
+  const first = addOrUpdateWord([], { word: 'critical', context: 'A sentence.', source: { articleId: 'a1', title: '文章一', count: 1 } });
+  const second = addOrUpdateWord(first, { word: 'critical', context: 'Another sentence.', source: { articleId: 'a1', count: 2 } });
+  assert.equal(second[0].sources.a1.title, '文章一');
+});
+
+test('空词形不匹配任何条目', () => {
+  assert.equal(findWordEntry([{ word: 'critical' }], ''), undefined);
+  assert.equal(findWordEntry([{ word: 'critical' }], '   '), undefined);
+  assert.equal(isWordSaved([{ word: 'critical' }], '   '), false);
+  // 空查询与空词形条目都不能互相命中，否则库里任一空词形条目会被空查询捡走（findWordEntry 的空值守卫）。
+  assert.equal(findWordEntry([{ word: '' }], ''), undefined);
+  assert.equal(findWordEntry([{ word: '   ' }], '   '), undefined);
+  assert.equal(isWordSaved([{ word: '  ' }], ''), false);
+});

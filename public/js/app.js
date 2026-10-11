@@ -1104,8 +1104,7 @@ function renderWordSourceList(entry) {
 }
 
 function renderWordDetail() {
-  const detailKey = wordKey(state.detailWord);
-  const entry = state.entries.find((item) => wordKey(item.word) === detailKey);
+  const entry = findWordEntry(state.entries, state.detailWord);
   elements.wordDetailContent.replaceChildren();
   if (!entry) {
     elements.wordDetailContent.append(createElement('p', 'book-empty', '没有找到这个单词，可能已被移除。'));
