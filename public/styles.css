@@ -95,6 +95,13 @@ html[data-theme="dark"] .theme-toggle { background: rgba(255,255,255,.06); }
 .key-word-card:hover { border-color: var(--green); transform: translateY(-1px); }
 .key-word-card strong { color: var(--green-dark); font: 700 18px var(--serif); }
 .key-word-card span, .word-sources { color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
+.annotation-note { margin: 0; color: var(--ink-soft); font-size: 11px; text-align: center; }
+.word-source-list { display: grid; gap: 10px; }
+.word-source-item { padding: 9px 11px; border: 1px solid var(--line); background: rgba(255,253,247,.42); }
+.word-source-item strong { display: block; color: var(--green-dark); font: 700 14px var(--serif); }
+.word-source-count { color: var(--ink-soft); font-size: 11px; }
+.word-source-sentences { margin: 7px 0 0; padding-left: 16px; color: var(--ink-soft); font-size: 12px; line-height: 1.6; }
+html[data-theme="dark"] .word-source-item { background: rgba(255,255,255,.045); }
 .reading-layout { width: min(1280px, calc(100% - 48px)); margin: auto; display: grid; grid-template-columns: minmax(0, 1fr) 355px; align-items: start; gap: clamp(28px, 5vw, 75px); }
 .book-shell { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 3px 10px 10px 3px; background: linear-gradient(90deg, rgba(25,40,34,.15), transparent 4%, transparent 96%, rgba(25,40,34,.08)), var(--paper-deep); box-shadow: 18px 20px 0 rgba(48, 69, 58, .10), inset 15px 0 22px rgba(26,36,30,.07); }
 html[data-theme="dark"] .book-shell { background: linear-gradient(90deg, rgba(0,0,0,.32), transparent 5%, transparent 96%, rgba(0,0,0,.2)), #293530; box-shadow: 18px 20px 0 rgba(0,0,0,.24), inset 15px 0 22px rgba(0,0,0,.25); }

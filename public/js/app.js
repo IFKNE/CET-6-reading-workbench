@@ -1,5 +1,5 @@
 import { splitParagraphs, tokenizeParagraph, classifySelection } from './text.js';
-import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, isWordSaved, resolveStoredWordForm, savedWordKeys, wordKey } from './wordbook.js';
+import { addOrUpdateWord, collectWordSources, createMarkdown, createWordSummary, filterWords, findWordEntry, isWordSaved, resolveStoredWordForm, savedWordKeys, wordKey } from './wordbook.js';
 import { requestTranslation } from './api.js';
 import { createArticleKey, createWarmupBatches, indexVocabulary, mergeVocabulary } from './article-cache.js';
 import { createArticleRecord, countWordInArticle, dedupeArticles, restoreArticleState, updateArticleMetadata } from './article-model.js';
@@ -16,6 +16,7 @@ Critical reading does not mean reading with suspicion alone. It means asking use
 
 const frequencyOrder = { '最高频': 0, '常见': 1, '较少见': 2 };
 const SAVE_WORD_LABEL = '加入单词本  +';
+const SAVE_WORD_AGAIN_LABEL = '本篇再记一次  +';
 const storageKeys = {
   article: 'cet6:article',
   wordbook: 'cet6:wordbook',
@@ -716,34 +717,43 @@ function renderWordAnnotation(data, queriedWord, context, { animateSave = false 
 
 function renderAnnotationActions(data, word, context, animateSave) {
   const actions = createElement('div', 'annotation-actions');
-  if (isWordSaved(state.entries, word)) {
-    const savedButton = createElement('button', `primary-button save-word is-saved${animateSave ? ' is-just-saved' : ''}`, '已加入单词本 ✓');
-    savedButton.type = 'button';
-    savedButton.disabled = true;
-    savedButton.setAttribute('aria-disabled', 'true');
+  const entry = findWordEntry(state.entries, word);
+  const recordedSource = entry && state.articleId ? entry.sources?.[state.articleId] : undefined;
+  const popSuffix = animateSave ? ' is-just-saved' : '';
+  if (recordedSource) {
+    const recordedButton = createElement('button', `primary-button save-word is-saved${popSuffix}`, `本篇已记录 ✓ · ${recordedSource.count ?? 0} 次`);
+    recordedButton.type = 'button';
+    recordedButton.disabled = true;
+    recordedButton.setAttribute('aria-disabled', 'true');
+    actions.append(recordedButton);
+  } else {
+    const label = entry ? SAVE_WORD_AGAIN_LABEL : SAVE_WORD_LABEL;
+    const saveButton = createElement('button', `primary-button save-word${popSuffix}`, label);
+    saveButton.type = 'button';
+    saveButton.addEventListener('click', async () => {
+      saveButton.disabled = true;
+      saveButton.classList.add('is-saving');
+      saveButton.textContent = '正在记录…';
+      try {
+        const result = await saveWordFromLookup(data, word, context);
+        refreshSavedWordUi(result?.word ?? word, { animate: true });
+      } catch (error) {
+        saveButton.disabled = false;
+        saveButton.classList.remove('is-saving');
+        saveButton.textContent = label;
+        setReaderStatus(error.message);
+      }
+    });
+    actions.append(saveButton);
+  }
+  if (entry) {
+    const sourceCount = Object.keys(entry.sources ?? {}).length;
+    actions.append(createElement('p', 'annotation-note', sourceCount ? `已在册 · 共 ${sourceCount} 篇来源` : '已在册 · 未关联精读文章'));
     const detailButton = createElement('button', 'text-button word-detail-link', '查看完整详情 →');
     detailButton.type = 'button';
     detailButton.addEventListener('click', () => openWordDetail(word, 'reader'));
-    actions.append(savedButton, detailButton);
-    return actions;
+    actions.append(detailButton);
   }
-  const saveButton = createElement('button', 'primary-button save-word', SAVE_WORD_LABEL);
-  saveButton.type = 'button';
-  saveButton.addEventListener('click', async () => {
-    saveButton.disabled = true;
-    saveButton.classList.add('is-saving');
-    saveButton.textContent = '正在加入…';
-    try {
-      const result = await saveWordFromLookup(data, word, context);
-      refreshSavedWordUi(result?.word ?? word, { animate: Boolean(result?.added) });
-    } catch (error) {
-      saveButton.disabled = false;
-      saveButton.classList.remove('is-saving');
-      saveButton.textContent = SAVE_WORD_LABEL;
-      setReaderStatus(error.message);
-    }
-  });
-  actions.append(saveButton);
   return actions;
 }
 
@@ -1025,6 +1035,28 @@ function renderWordbook() {
   }
 }
 
+function renderWordSourceList(entry) {
+  const block = createElement('div', 'word-source-list');
+  const sources = collectWordSources(entry);
+  if (!sources.length) {
+    block.append(createElement('p', 'word-sources', '尚未关联精读文章'));
+    return block;
+  }
+  const total = sources.reduce((sum, source) => sum + source.count, 0);
+  block.append(createElement('p', 'word-sources', `共 ${sources.length} 篇来源 · 出现 ${total} 次`));
+  sources.forEach((source) => {
+    const item = createElement('div', 'word-source-item', [
+      createElement('strong', '', source.title),
+      createElement('span', 'word-source-count', `${source.count} 次`)
+    ]);
+    if (source.sentences.length) {
+      item.append(createElement('ul', 'word-source-sentences', source.sentences.map((sentence) => createElement('li', '', sentence))));
+    }
+    block.append(item);
+  });
+  return block;
+}
+
 function renderWordDetail() {
   const detailKey = wordKey(state.detailWord);
   const entry = state.entries.find((item) => wordKey(item.word) === detailKey);
@@ -1050,7 +1082,7 @@ function renderWordDetail() {
     button.type = 'button'; button.addEventListener('click', () => updateWordEntry(entry.word, { learningStatus: value })); statusControls.append(button);
   });
   const tags = (entry.importanceTags ?? []).map((tag) => createElement('span', 'importance-tag', tag));
-  const sources = Object.values(entry.sources ?? {}).map((source) => `${source.title}（${source.count} 次）`).join('；') || '尚未关联精读文章';
+  const sourcesBlock = renderWordSourceList(entry);
   elements.wordDetailContent.append(createElement('article', 'word-detail-sheet', [
     back,
     createElement('p', 'eyebrow', 'CET–6 VOCABULARY NOTE'),
@@ -1059,7 +1091,7 @@ function renderWordDetail() {
     createElement('p', 'word-main-meaning', summary.meaning),
     createElement('section', 'detail-summary-section', [createElement('h2', '', '常用短语'), createElement('p', '', summary.phrase)]),
     createElement('section', 'detail-summary-section', [createElement('h2', '', '原文例句'), createElement('p', 'word-example', `${summary.example}${entry.example?.chinese ? ` · ${entry.example.chinese}` : ''}`)]),
-    createElement('section', 'detail-summary-section', [createElement('h2', '', '来源与掌握度'), createElement('p', 'word-sources', sources), statusControls]),
+    createElement('section', 'detail-summary-section', [createElement('h2', '', '来源与掌握度'), sourcesBlock, statusControls]),
     createElement('section', 'detail-archive-section', [createElement('h2', '', '详细六级档案'), renderArchiveBlock(entry)]),
     remove
   ]));

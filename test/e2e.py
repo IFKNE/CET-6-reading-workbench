@@ -30,6 +30,8 @@ def main():
         page.locator(".word-token").first.click()
         page.locator(".save-word").click()
         expect(page.locator(".save-word.is-saved")).to_have_count(1)
+        # 新规格：收录后按钮是「本篇已记录 ✓ · N 次」（N = 该篇出现次数），不再是「已加入单词本 ✓」。
+        expect(page.locator(".save-word")).to_contain_text("本篇已记录")
         expect(page.locator(".word-detail-link")).to_be_visible()
         page.locator(".word-detail-link").click()
         expect(page.locator("#word-detail-view")).to_be_visible()
