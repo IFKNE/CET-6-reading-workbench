@@ -464,7 +464,9 @@ test('迁移时单词本保留服务器已有条目，只补新词', async () =>
 
 test('putWordbook 拒绝非数组，不会写出自己读不回来的文档', async () => {
   const { dataDir, store } = await createTemporaryStore();
-  await assert.rejects(() => store.putWordbook('hello'), { message: /entries 必须是数组/ });
+  // statusCode 挂在错误上：路由层按它回 400，而不是靠 instanceof TypeError 猜
+  // （fetch 的网络故障也是 TypeError，靠类型猜会把上游故障误报成 400）。
+  await assert.rejects(() => store.putWordbook('hello'), (error) => error.statusCode === 400 && /entries 必须是数组/.test(error.message));
   // 关键：拒绝之后文件仍然可读——否则整库会因为一次坏调用变成打不开的状态。
   assert.deepEqual(await createStore({ dataDir }).getWordbook(), []);
 });
@@ -518,10 +520,21 @@ Expected: FAIL — `store.importAll is not a function`
 
    注意用 `Promise.reject` 而不是同步 `throw`：本仓库的测试用 `assert.rejects(() => store.putWordbook('hello'))`，而**同步 throw 不会被 `assert.rejects` 当作 rejection**（已实测：错误直接冒泡、断言失败）。其他成员都是「返回 Promise、失败即 rejection」，这里保持一致。
 
+   还要把「这是调用方的错（400）」挂在错误对象上：路由层因此不必靠 `instanceof TypeError` 去猜——`fetch` 的网络故障（`TypeError: fetch failed`）也是 TypeError，靠类型猜会把上游故障误报成 400。在 `server/store.js` 的模块级加一个构造器：
+
+```js
+// 参数不合法是调用方的问题，不是服务故障：把 400 挂在错误上，让路由层按 statusCode 取值。
+function invalidArgument(message) {
+  const error = new TypeError(message);
+  error.statusCode = 400;
+  return error;
+}
+```
+
 ```js
     putWordbook(entries) {
       // 保持「返回 Promise、失败即 rejection」的接口一致性：同步 throw 会绕过 assert.rejects 与调用方的 .catch()。
-      if (!Array.isArray(entries)) return Promise.reject(new TypeError('entries 必须是数组。'));
+      if (!Array.isArray(entries)) return Promise.reject(invalidArgument('entries 必须是数组。'));
       return mutate((current) => {
         current.wordbook = structuredClone(entries);
         return current.wordbook.length;
@@ -557,7 +570,7 @@ Expected: FAIL — `store.importAll is not a function`
     importAll({ articles = [], folders = [], wordbook = [] } = {}) {
       // 与 putWordbook 同一条理由：参数不是数组就拒绝，别把字符串当数组遍历后写进库。
       for (const [name, value] of [['articles', articles], ['folders', folders], ['wordbook', wordbook]]) {
-        if (!Array.isArray(value)) return Promise.reject(new TypeError(`${name} 必须是数组。`));
+        if (!Array.isArray(value)) return Promise.reject(invalidArgument(`${name} 必须是数组。`));
       }
       return mutate((current) => {
         let importedArticles = 0;
@@ -718,13 +731,21 @@ test('路径 id 为空白时返回 400，且不改动数据', async () => {
   assert.deepEqual((await request(app).get('/api/library')).body.articles, []);
 });
 
-test('存储层出错时返回 500 并带上原因', async () => {
-  // 注入一个必然失败的 store：验证「校验通过之后才写、写失败要转成 500 文案」这条链路。
+test('存储层出错时按错误自带的状态码返回', async () => {
+  // 没带 statusCode 的按兜底值 500 返回，并带上原因。
   const failing = { listArticles: async () => { throw new Error('磁盘写入失败。'); }, listFolders: async () => [] };
-  const app = createApp({ translator, store: failing });
-  const response = await request(app).get('/api/library');
-  assert.equal(response.status, 500);
-  assert.equal(response.body.error, '磁盘写入失败。');
+  const failed = await request(createApp({ translator, store: failing })).get('/api/library');
+  assert.equal(failed.status, 500);
+  assert.equal(failed.body.error, '磁盘写入失败。');
+
+  // 自带 statusCode 的（存储层参数守卫挂的 400）按它返回。
+  const rejecting = {
+    listArticles: async () => { const error = new Error('参数不合法。'); error.statusCode = 400; throw error; },
+    listFolders: async () => []
+  };
+  const rejected = await request(createApp({ translator, store: rejecting })).get('/api/library');
+  assert.equal(rejected.status, 400);
+  assert.equal(rejected.body.error, '参数不合法。');
 });
 ```
 
@@ -746,12 +767,11 @@ import { createStore } from './store.js';
 const validScopes = new Set(['word', 'word-batch', 'phrase', 'sentence', 'paragraph', 'question', 'prestudy']);
 const MAX_ARTICLE_LENGTH = 100000;
 
-// 全文件唯一的「异常 → 状态码」规则，别让每个 handler 各写一套：
-// 带 statusCode 的（翻译上游错误）用自己的；存储层参数类型错误算 400；其余算服务端故障。
+// 全文件唯一的「异常 → 状态码」规则：错误自带 statusCode 就用它（存储层的参数守卫挂 400、
+// 翻译上游错误带自己的码、缺 Key 挂 503），否则回落到调用方给的兜底值。
+// 不按 instanceof TypeError 猜——fetch 的网络故障也是 TypeError，猜错会把上游故障报成 400。
 function statusForError(error, fallback) {
-  if (error.statusCode) return error.statusCode;
-  if (error instanceof TypeError) return 400;
-  return fallback;
+  return error.statusCode ?? fallback;
 }
 
 // 名字里写明 OrRespond：它失败时自己就把 400 写进响应了，
