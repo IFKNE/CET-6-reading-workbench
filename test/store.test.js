@@ -213,9 +213,9 @@ test('deleteFolder 收到空 id 时不动「未归档」的文章', async () => 
 
 test('importAll 参数不是数组时拒绝，不会写出坏文档', async () => {
   const { dataDir, store } = await createTemporaryStore();
-  // 不加守卫时会返回 { folders: 2 } 并把裸字符串写进 folders（'ab' 被当作可遍历对象）。
-  await assert.rejects(() => store.importAll({ folders: 'ab' }), { message: /folders 必须是数组/ });
-  await assert.rejects(() => store.importAll({ articles: 'x' }), { message: /articles 必须是数组/ });
+  // 与 putWordbook 的守卫一致：statusCode 挂在错误上，路由层据此回 400。
+  await assert.rejects(() => store.importAll({ folders: 'ab' }), (error) => error.statusCode === 400 && /folders 必须是数组/.test(error.message));
+  await assert.rejects(() => store.importAll({ articles: 'x' }), (error) => error.statusCode === 400 && /articles 必须是数组/.test(error.message));
   assert.deepEqual(await createStore({ dataDir }).listFolders(), []);
 });
 

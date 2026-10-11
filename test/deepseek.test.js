@@ -81,3 +81,11 @@ test('批量单词预热解析为词条数组并可通过本机 API', async () =
   assert.equal(response.status, 200);
   assert.equal(response.body.kind, 'word-batch');
 });
+
+test('翻译上游网络故障按 502 返回而不是 400', async () => {
+  // 复核发现：这个回归曾无测试覆盖——把 statusForError 改回 instanceof TypeError → 400，
+  // 132 个测试照样全绿。这条测试就是用来钉住它的。
+  const app = createApp({ translator: { translate: async () => { throw new TypeError('fetch failed'); } } });
+  const response = await request(app).post('/api/translate').send({ scope: 'phrase', text: 'in fact' });
+  assert.equal(response.status, 502);
+});

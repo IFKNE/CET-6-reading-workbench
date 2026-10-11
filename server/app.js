@@ -6,11 +6,12 @@ import { createStore } from './store.js';
 const validScopes = new Set(['word', 'word-batch', 'phrase', 'sentence', 'paragraph', 'question', 'prestudy']);
 const MAX_ARTICLE_LENGTH = 100000;
 
-// 全文件唯一的「异常 → 状态码」规则：错误自带 statusCode 就用它（存储层的参数守卫挂 400、
-// 翻译上游错误带自己的码、缺 Key 挂 503），否则回落到调用方给的兜底值。
-// 不按 instanceof TypeError 猜——fetch 的网络故障也是 TypeError，猜错会把上游故障报成 400。
+// 全文件唯一的「异常 → 状态码」规则：错误自带 statusCode 就用它，否则回落到调用方给的兜底值。
+// 目前的产出方：server/index.js 缺 Key 时挂 503、server/store.js 参数守卫挂 400。
+// 不按 instanceof TypeError 猜——fetch 的网络故障（TypeError: fetch failed）也是 TypeError，
+// 猜错会把上游故障报成 400（这条有 test/deepseek.test.js 的「翻译上游网络故障按 502 返回」钉住）。
 function statusForError(error, fallback) {
-  return error.statusCode ?? fallback;
+  return error?.statusCode ?? fallback;
 }
 
 // 名字里写明 OrRespond：它失败时自己就把 400 写进响应了，

@@ -54,6 +54,10 @@ test('PUT 文章校验 id 一致、正文非空且不超长', async () => {
   const tooLong = await request(app).put('/api/library/articles/a1').send(article('a1', { article: 'x'.repeat(100001) }));
   assert.equal(tooLong.status, 400);
   assert.match(tooLong.body.error, /100000/);
+
+  // 上界是「包含」而不是「小于」：正好 100000 字符必须放行。
+  const atLimit = await request(app).put('/api/library/articles/a1').send(article('a1', { article: 'x'.repeat(100000) }));
+  assert.equal(atLimit.status, 200);
 });
 
 test('文件夹可增删，删除时返回解绑篇数', async () => {
