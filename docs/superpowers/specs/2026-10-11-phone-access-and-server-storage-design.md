@@ -44,7 +44,7 @@
 | `DELETE /api/library/folders/:id` | 删除并解绑其文章，返回 `{ ok: true, detached: N }` |
 | `GET /api/wordbook` | `{ entries }` |
 | `PUT /api/wordbook` | 整体替换；校验是数组、每项 `word` 非空 |
-| `POST /api/library/import` | 一次性迁移：`{ articles, folders, wordbook }`，按 id upsert、文章取 `updatedAt` 较新者胜；返回 `{ imported: { articles, folders, wordbook } }` |
+| `POST /api/library/import` | 一次性迁移：`{ articles, folders, wordbook }`。文章与文件夹按 `id` upsert，文章冲突时取 `updatedAt` 较新的一方；单词本**只补服务器还没有的词**（同词条目保留服务器版本，避免用本机旧档案覆盖）；返回 `{ imported: { articles, folders, wordbook } }` |
 
 ### C. 前端改造（尽量不动 `app.js` 的业务逻辑）
 
