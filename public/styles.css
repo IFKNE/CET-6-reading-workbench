@@ -317,3 +317,10 @@ html[data-theme="dark"] .drawer-backdrop { background: rgba(0,0,0,.56); }
 .folder-chip button.is-new { animation: folder-chip-pop .7s cubic-bezier(.2, .9, .3, 1.4); }
 @keyframes folder-chip-pop { 35% { transform: scale(1.12); } }
 @media (prefers-reduced-motion: reduce) { .folder-chip button.is-new { animation: none; } }
+
+.server-status { position: sticky; top: 0; z-index: 30; margin: 0; padding: 10px 18px; color: #3d1f16; background: var(--marker); font-size: 13px; text-align: center; }
+.library-sync { margin-top: 34px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255, 255, 255, .35); }
+html[data-theme="dark"] .library-sync { background: rgba(255, 255, 255, .04); }
+.library-sync h3 { margin: 6px 0 8px; font: 700 18px var(--serif); }
+.library-sync .sync-hint { margin: 0 0 14px; color: var(--ink-soft); font-size: 13px; }
+.library-sync .quiet-button.is-highlighted { padding: 9px 16px; border-radius: 999px; color: var(--paper); background: var(--green); }

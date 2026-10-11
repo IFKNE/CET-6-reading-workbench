@@ -9,6 +9,7 @@
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
+    <p id="server-status" class="server-status" role="status" hidden>未连接到电脑服务器，数据未同步。请确认电脑已开机、本机服务已启动，并且手机已连上 Tailscale。</p>
     <header class="site-header">
       <a class="brand" href="#paste-view" aria-label="返回文章输入页"><span>R</span>eading <i>room</i></a>
       <div class="header-meta">CET–6 · 精读工作台</div>
@@ -41,6 +42,13 @@
           <p id="folder-message" class="form-message" role="alert"></p>
           <div id="folder-shelf" class="folder-shelf" aria-label="精读文件夹"></div>
           <div id="article-library-list" class="article-library-list"><p class="book-empty">还没有保存的精读文章。</p></div>
+          <div id="library-sync" class="library-sync">
+            <p class="eyebrow">DEVICE SYNC</p>
+            <h3>数据同步</h3>
+            <p class="sync-hint">文章与单词本保存在这台电脑上。手机打开同一地址就能看到同一份数据。</p>
+            <button id="upload-local-data" class="quiet-button" type="button">把本机数据上传到服务器</button>
+            <p id="sync-message" class="form-message" role="status"></p>
+          </div>
         </section>
       </section>
 

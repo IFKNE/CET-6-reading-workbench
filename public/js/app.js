@@ -4,7 +4,8 @@ import { requestTranslation } from './api.js';
 import { createArticleKey, createWarmupBatches, indexVocabulary, mergeVocabulary } from './article-cache.js';
 import { createArticleRecord, countWordInArticle, dedupeArticles, restoreArticleState, updateArticleMetadata } from './article-model.js';
 import { createFolder, deleteArticle, deleteFolder, getArticle, listArticles, listFolders, saveArticle } from './article-library.js';
-import { fetchWordbook, putWordbook } from './library-api.js';
+import { fetchWordbook, importLocalData, putWordbook, subscribeServerStatus } from './library-api.js';
+import { listLegacyArticles, listLegacyFolders, readLegacyWordbook } from './legacy-library.js';
 import { filterArticles, listCategories, validateFolderName } from './library-filter.js';
 import { nextTheme, readTheme } from './theme.js';
 import { resolveViewBack } from './view-nav.js';
@@ -34,6 +35,9 @@ const elements = {
   wordDetailView: document.querySelector('#word-detail-view'),
   wordDetailContent: document.querySelector('#word-detail-content'),
   libraryMount: document.querySelector('#library-mount'),
+  serverStatus: document.querySelector('#server-status'),
+  uploadLocalData: document.querySelector('#upload-local-data'),
+  syncMessage: document.querySelector('#sync-message'),
   articleInput: document.querySelector('#article-input'),
   articleCategory: document.querySelector('#article-category'),
   customCategory: document.querySelector('#custom-category'),
@@ -142,7 +146,8 @@ let wordbookWriteChain = Promise.resolve();
 let wordbookLoadPromise = null;
 
 function ensureWordbookLoaded() {
-  if (!wordbookLoadPromise) wordbookLoadPromise = loadWordbook();
+  // 上次拉取失败就再试一次：否则手机断一下网，不刷新页面就一直存不了词。
+  if (!wordbookLoadPromise || state.wordbookStatus === 'failed') wordbookLoadPromise = loadWordbook();
   return wordbookLoadPromise;
 }
 
@@ -427,6 +432,8 @@ async function renderArticleLibrary() {
     renderFolderOptions(folders);
     renderCategoryShelf(articles);
     renderFolderShelf(folders, articles);
+    // 服务器库还是空的，说明本机浏览器里可能有一批待迁移的老数据，把上传按钮点亮。
+    elements.uploadLocalData.classList.toggle('is-highlighted', articles.length === 0);
     const visibleArticles = filterArticles(articles, { folderId: state.libraryFolderId, category: state.libraryCategory });
     if (!visibleArticles.length) {
       const folderLimited = state.libraryFolderId !== 'all';
@@ -449,7 +456,9 @@ async function renderArticleLibrary() {
         createElement('strong', '', record.title),
         createElement('small', '', `${new Date(record.updatedAt).toLocaleDateString('zh-CN')} · ${Object.keys(record.vocabulary ?? {}).length} 个重点词`)
       ]);
-      open.type = 'button'; open.addEventListener('click', () => openSavedArticle(record.id));
+      open.type = 'button';
+      // 适配层现在走网络：离线时 getArticle/listFolders 会 reject，必须接住并提示。
+      open.addEventListener('click', () => { openSavedArticle(record.id).catch((error) => setReaderStatus(error.message)); });
       const edit = document.createElement('details'); edit.className = 'article-card-edit';
       edit.append(createElement('summary', '', '重命名 / 分类 / 文件夹'));
       const title = document.createElement('input'); title.value = record.title; title.setAttribute('aria-label', '文章标题');
@@ -1338,6 +1347,39 @@ document.querySelectorAll('a[href="#paste-view"]').forEach((link) => {
   link.addEventListener('click', () => window.setTimeout(switchToPaste, 0));
 });
 document.querySelector('#open-library').addEventListener('click', () => switchView('library'));
+function setSyncMessage(message, success = false) {
+  elements.syncMessage.textContent = message;
+  elements.syncMessage.classList.toggle('is-success', success);
+}
+
+async function uploadLocalData() {
+  elements.uploadLocalData.disabled = true;
+  setSyncMessage('正在读取本机数据…');
+  try {
+    const [articles, folders] = await Promise.all([listLegacyArticles(), listLegacyFolders()]);
+    const wordbook = readLegacyWordbook();
+    // 迁移是「只增不减」的合并：服务器上没有墓碑记录，所以服务器上删过的文章
+    // 会被本机旧数据重新带回来。这不是 bug，但必须让用户在重复点击前知道。
+    const existing = await listArticles();
+    if (existing.length && !window.confirm(`服务器上已有 ${existing.length} 篇文章。继续会把本机数据合并进去：不会删除服务器上的内容，但你在服务器上删除过的文章可能被本机旧数据补回来。继续？`)) {
+      setSyncMessage('已取消，未上传任何数据。');
+      return;
+    }
+    const { imported } = await importLocalData({ articles, folders, wordbook });
+    setSyncMessage(`已上传 ${imported.articles} 篇、${imported.wordbook} 个词。本机数据仍保留在原浏览器里，可随时回退。`, true);
+    await loadWordbook();
+    await renderArticleLibrary();
+  } catch (error) {
+    setSyncMessage(error.message);
+  } finally {
+    elements.uploadLocalData.disabled = false;
+  }
+}
+
+subscribeServerStatus((isOnline) => {
+  elements.serverStatus.hidden = isOnline;
+});
+
 async function createFolderFromInput() {
   const name = elements.newFolderName.value.trim();
   const check = validateFolderName(name, await listFolders());
@@ -1360,15 +1402,16 @@ async function createFolderFromInput() {
   elements.newFolderName.focus();
 }
 
-elements.createFolder.addEventListener('click', createFolderFromInput);
+elements.createFolder.addEventListener('click', () => { createFolderFromInput().catch((error) => setFolderMessage(error.message)); });
 elements.createFolder.disabled = true;
 elements.newFolderName.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') { event.preventDefault(); createFolderFromInput(); }
+  if (event.key === 'Enter') { event.preventDefault(); createFolderFromInput().catch((error) => setFolderMessage(error.message)); }
 });
 elements.newFolderName.addEventListener('input', () => {
   elements.createFolder.disabled = !elements.newFolderName.value.trim();
   setFolderMessage('');
 });
+elements.uploadLocalData.addEventListener('click', uploadLocalData);
 elements.articleFolder.addEventListener('change', () => { state.folderId = elements.articleFolder.value; });
 elements.themeToggle.addEventListener('click', () => applyTheme(nextTheme(document.documentElement.dataset.theme)));
 elements.saveArticle.addEventListener('click', () => {
