@@ -311,3 +311,9 @@ html[data-theme="dark"] .drawer-backdrop { background: rgba(0,0,0,.56); }
   .nav-button { padding: 6px 8px; font-size: 11px; }
   .article-library-list { grid-template-columns: 1fr; }
 }
+
+.form-message.is-success { color: var(--green); }
+.folder-chip button:disabled { color: var(--ink-soft); opacity: .55; cursor: not-allowed; }
+.folder-chip button.is-new { animation: folder-chip-pop .7s cubic-bezier(.2, .9, .3, 1.4); }
+@keyframes folder-chip-pop { 35% { transform: scale(1.12); } }
+@media (prefers-reduced-motion: reduce) { .folder-chip button.is-new { animation: none; } }

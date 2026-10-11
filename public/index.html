@@ -36,7 +36,9 @@
         <p id="paste-error" class="form-message" role="alert"></p>
         <section id="article-library" class="article-library" aria-label="我的精读文章">
           <div class="library-heading"><p class="eyebrow">MY READINGS</p><h2>我的精读</h2></div>
-          <div class="folder-create-row"><input id="new-folder-name" type="text" maxlength="24" placeholder="新建文件夹，例如：长篇阅读" aria-label="新建精读文件夹" /><button id="create-folder" class="quiet-button" type="button">新建文件夹 ＋</button></div>
+          <div id="category-shelf" class="folder-shelf" aria-label="按文章类型筛选"></div>
+          <div class="folder-create-row"><input id="new-folder-name" type="text" maxlength="24" placeholder="新建文件夹名称，例如：真题听力" aria-label="新建精读文件夹" /><button id="create-folder" class="quiet-button" type="button">新建文件夹 ＋</button></div>
+          <p id="folder-message" class="form-message" role="alert"></p>
           <div id="folder-shelf" class="folder-shelf" aria-label="精读文件夹"></div>
           <div id="article-library-list" class="article-library-list"><p class="book-empty">还没有保存的精读文章。</p></div>
         </section>

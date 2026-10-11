@@ -4,6 +4,7 @@ import { requestTranslation } from './api.js';
 import { createArticleKey, createWarmupBatches, indexVocabulary, mergeVocabulary } from './article-cache.js';
 import { createArticleRecord, countWordInArticle, dedupeArticles, restoreArticleState, updateArticleMetadata } from './article-model.js';
 import { createFolder, deleteArticle, deleteFolder, getArticle, listArticles, listFolders, saveArticle } from './article-library.js';
+import { filterArticles, listCategories, validateFolderName } from './library-filter.js';
 import { nextTheme, readTheme } from './theme.js';
 import { resolveViewBack } from './view-nav.js';
 import { clearSelection, createSourceTree, describeSelection, filterEntriesBySource, groupCheckState, selectAll, toggleArticle, toggleFolder, toggleUnfiled, toggleUnlinked } from './word-sources.js';
@@ -39,6 +40,8 @@ const elements = {
   articleFolder: document.querySelector('#article-folder'),
   articleLibraryList: document.querySelector('#article-library-list'),
   folderShelf: document.querySelector('#folder-shelf'),
+  categoryShelf: document.querySelector('#category-shelf'),
+  folderMessage: document.querySelector('#folder-message'),
   newFolderName: document.querySelector('#new-folder-name'),
   createFolder: document.querySelector('#create-folder'),
   pasteError: document.querySelector('#paste-error'),
@@ -86,6 +89,8 @@ const state = {
   warmupToken: 0,
   folderId: '',
   libraryFolderId: 'all',
+  libraryCategory: 'all',
+  libraryNewFolderId: '',
   libraryRenderId: 0,
   libraryIndex: { articles: [], folders: [] },
   sourceSelection: selectAll(),
@@ -301,22 +306,53 @@ function renderFolderOptions(folders, selectedId = state.folderId) {
   elements.articleFolder.value = folders.some((folder) => folder.id === selectedId) ? selectedId : '';
 }
 
-function renderFolderShelf(folders) {
+function setFolderMessage(message, isSuccess = false) {
+  elements.folderMessage.textContent = message;
+  elements.folderMessage.classList.toggle('is-success', Boolean(message) && isSuccess);
+}
+
+// 类型 chips：全局篇数（不随文件夹变化），单选，篇数为 0 的置灰不可点。
+function renderCategoryShelf(articles) {
+  elements.categoryShelf.replaceChildren();
+  // listCategories() 只返回 { name, count }，这里补上 chip 需要的 id（用类型名当取值）。
+  const categories = listCategories(articles).map((item) => ({ id: item.name, name: item.name, count: item.count }));
+  const choices = [{ id: 'all', name: '全部类型', count: articles.length }, ...categories];
+  choices.forEach((choice) => {
+    const chip = createElement('div', 'folder-chip');
+    const button = createElement('button', state.libraryCategory === choice.id ? 'is-active' : '', `${choice.name} (${choice.count})`);
+    button.type = 'button';
+    button.disabled = choice.count === 0;
+    button.addEventListener('click', () => { state.libraryCategory = choice.id; renderArticleLibrary(); });
+    chip.append(button);
+    elements.categoryShelf.append(chip);
+  });
+}
+
+function renderFolderShelf(folders, articles = []) {
   elements.folderShelf.replaceChildren();
-  const choices = [{ id: 'all', name: '全部文章' }, { id: '', name: '未归档' }, ...folders];
+  const newFolderId = state.libraryNewFolderId;
+  state.libraryNewFolderId = '';
+  const choices = [
+    { id: 'all', name: `全部文章 (${articles.length})` },
+    { id: '', name: `未归档 (${filterArticles(articles, { folderId: '' }).length})` },
+    ...folders.map((folder) => ({ id: folder.id, name: `${folder.name} (${filterArticles(articles, { folderId: folder.id }).length})` }))
+  ];
   choices.forEach((folder) => {
     const chip = createElement('div', 'folder-chip');
-    const open = createElement('button', state.libraryFolderId === folder.id ? 'is-active' : '', folder.name);
+    const classes = [];
+    if (state.libraryFolderId === folder.id) classes.push('is-active');
+    if (folder.id && folder.id === newFolderId) classes.push('is-new');
+    const open = createElement('button', classes.join(' '), folder.name);
     open.type = 'button';
     open.addEventListener('click', () => { state.libraryFolderId = folder.id; renderArticleLibrary(); });
     chip.append(open);
     if (folder.id && folder.id !== 'all') {
       const remove = createElement('button', 'folder-delete', '×');
-      remove.type = 'button'; remove.title = `删除文件夹 ${folder.name}`;
+      remove.type = 'button'; remove.title = `删除文件夹 ${folder.name.replace(/\s*\(\d+\)$/, '')}`;
       remove.addEventListener('click', async () => {
-        if (!window.confirm(`删除“${folder.name}”文件夹？其中的文章将保留为未归档。`)) return;
-        const articles = await listArticles();
-        await Promise.all(articles.filter((article) => article.folderId === folder.id).map((article) => saveArticle({ ...article, folderId: '', updatedAt: new Date().toISOString() })));
+        if (!window.confirm(`删除“${folder.name.replace(/\s*\(\d+\)$/, '')}”文件夹？其中的文章将保留为未归档。`)) return;
+        const all = await listArticles();
+        await Promise.all(all.filter((article) => article.folderId === folder.id).map((article) => saveArticle({ ...article, folderId: '', updatedAt: new Date().toISOString() })));
         await deleteFolder(folder.id);
         if (state.libraryFolderId === folder.id) state.libraryFolderId = 'all';
         if (state.folderId === folder.id) state.folderId = '';
@@ -343,10 +379,20 @@ async function renderArticleLibrary() {
     if (state.view === 'wordbook') renderWordbook();
     const articles = dedupeArticles(storedArticles);
     renderFolderOptions(folders);
-    renderFolderShelf(folders);
-    const visibleArticles = state.libraryFolderId === 'all' ? articles : articles.filter((article) => (article.folderId || '') === state.libraryFolderId);
+    renderCategoryShelf(articles);
+    renderFolderShelf(folders, articles);
+    const visibleArticles = filterArticles(articles, { folderId: state.libraryFolderId, category: state.libraryCategory });
     if (!visibleArticles.length) {
-      elements.articleLibraryList.append(createElement('p', 'book-empty', articles.length ? '这个文件夹里还没有文章。' : '还没有保存的精读文章。'));
+      const folderLimited = state.libraryFolderId !== 'all';
+      const categoryLimited = state.libraryCategory !== 'all';
+      const message = !articles.length
+        ? '还没有保存的精读文章。'
+        : folderLimited && categoryLimited
+          ? `这个文件夹里没有“${state.libraryCategory}”类型的文章。`
+          : categoryLimited
+            ? `没有“${state.libraryCategory}”类型的文章。`
+            : '这个文件夹里还没有文章。';
+      elements.articleLibraryList.append(createElement('p', 'book-empty', message));
       return;
     }
     visibleArticles.forEach((record) => {
@@ -1239,16 +1285,36 @@ document.querySelectorAll('a[href="#paste-view"]').forEach((link) => {
   link.addEventListener('click', () => window.setTimeout(switchToPaste, 0));
 });
 document.querySelector('#open-library').addEventListener('click', () => switchView('library'));
-elements.createFolder.addEventListener('click', async () => {
+async function createFolderFromInput() {
   const name = elements.newFolderName.value.trim();
-  if (!name) { elements.newFolderName.focus(); return; }
-  const folders = await listFolders();
-  if (folders.some((folder) => folder.name === name)) { elements.newFolderName.select(); return; }
-  const folder = await createFolder(name);
+  const check = validateFolderName(name, await listFolders());
+  if (!check.ok) {
+    setFolderMessage(check.message);
+    elements.newFolderName.focus();
+    return;
+  }
+  // createFolder() 实际 resolve 出的是新文件夹的 id（IDB put 的 key），不是文件夹对象；
+  // 这里兼容「id 字符串」与「文件夹对象」两种形态，避免 folder.id / folder.name 取到 undefined。
+  const created = await createFolder(name);
+  const folderId = typeof created === 'string' ? created : created?.id ?? '';
   elements.newFolderName.value = '';
-  state.folderId = folder.id;
-  state.libraryFolderId = folder.id;
+  elements.createFolder.disabled = true;
+  // 只设“下次保存文章的默认文件夹”，不切换当前筛选，避免列表被清空。
+  state.folderId = folderId;
+  state.libraryNewFolderId = folderId;
+  setFolderMessage(`已创建文件夹“${name}”。`, true);
   await renderArticleLibrary();
+  elements.newFolderName.focus();
+}
+
+elements.createFolder.addEventListener('click', createFolderFromInput);
+elements.createFolder.disabled = true;
+elements.newFolderName.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') { event.preventDefault(); createFolderFromInput(); }
+});
+elements.newFolderName.addEventListener('input', () => {
+  elements.createFolder.disabled = !elements.newFolderName.value.trim();
+  setFolderMessage('');
 });
 elements.articleFolder.addEventListener('change', () => { state.folderId = elements.articleFolder.value; });
 elements.themeToggle.addEventListener('click', () => applyTheme(nextTheme(document.documentElement.dataset.theme)));
