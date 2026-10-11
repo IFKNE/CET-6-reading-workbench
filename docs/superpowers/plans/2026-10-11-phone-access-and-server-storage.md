@@ -823,6 +823,12 @@ test('迁移接口合并本机数据', async () => {
   const bad = await request(app).post('/api/library/import').send({ articles: 'nope' });
   assert.equal(bad.status, 400);
   assert.match(bad.body.error, /articles/);
+
+  // 迁移路径要和 PUT /api/wordbook 守同一条规则：空白词形不许进库，
+  // 否则单词本里会多出看不见却删不掉的空条目（Task 3 复核指出过这个缺口）。
+  const blankWord = await request(app).post('/api/library/import').send({ wordbook: [{ word: '   ' }] });
+  assert.equal(blankWord.status, 400);
+  assert.match(blankWord.body.error, /word/);
 });
 ```
 
@@ -861,6 +867,9 @@ Expected: FAIL — 新增的 2 个 test 返回 404
     for (const [name, value] of [['articles', articles], ['folders', folders], ['wordbook', wordbook]]) {
       if (!Array.isArray(value)) return res.status(400).json({ error: `${name} 必须是数组。` });
     }
+    // 与 PUT /api/wordbook 同一条规则：空白词形不许进库。
+    const blankWord = wordbook.find((entry) => typeof entry?.word !== 'string' || entry.word.trim().length === 0);
+    if (blankWord) return res.status(400).json({ error: '每个单词条目的 word 必须是非空文本。' });
     try {
       return res.json({ imported: await store.importAll({ articles, folders, wordbook }) });
     } catch (error) {
