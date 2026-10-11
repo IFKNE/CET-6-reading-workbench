@@ -1507,7 +1507,9 @@ async function requestJson(url, options = {}) {
     // 计时器要一直活到读完响应体：认证门户可能先回响应头、再把响应体挂住。
     body = await response.json().catch((error) => {
       // 读响应体时被中止（超时）要和「连不上」同类，而不是「数据无法解析」。
-      if (controller.signal.aborted) throw error;
+      // 两个条件都要判：signal.aborted 覆盖计时器到点的情况，
+      // AbortError 覆盖「读取本身就被中止」（测试里用 stub 模拟的就是这种）。
+      if (controller.signal.aborted || error?.name === 'AbortError') throw error;
       parsed = false;
       return null;
     });
@@ -1908,7 +1910,9 @@ Task 8b 把计时器延长到覆盖 `response.json()`，但那次中止被内层
     // 计时器要一直活到读完响应体：认证门户可能先回响应头、再把响应体挂住。
     body = await response.json().catch((error) => {
       // 读响应体时被中止（超时）要和「连不上」同类，而不是「数据无法解析」。
-      if (controller.signal.aborted) throw error;
+      // 两个条件都要判：signal.aborted 覆盖计时器到点的情况，
+      // AbortError 覆盖「读取本身就被中止」（测试里用 stub 模拟的就是这种）。
+      if (controller.signal.aborted || error?.name === 'AbortError') throw error;
       parsed = false;
       return null;
     });
