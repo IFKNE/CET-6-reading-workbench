@@ -153,6 +153,9 @@ function ensureWordbookLoaded() {
 
 function setWordbookError(message) {
   state.wordbookError = message || '';
+  // 同时写进精读页的状态行：单词本列表在抽屉/单词本页，精读页看不见，
+  // 否则用户点「加入单词本」后看到的是成功文案，而这一次其实没存上。
+  if (message) setReaderStatus(message);
   renderWordbook();
 }
 

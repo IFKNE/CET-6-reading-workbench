@@ -1,3 +1,13 @@
+"""浏览器端到端脚本（需要本机已装 playwright：`pip install playwright` 且 `playwright install chromium`）。
+
+**已知过时，跑之前先改：**
+- 单词本已经不再存在 localStorage（`cet6:wordbook`）：第 49 行附近往 localStorage 里写词的种子代码对现在的实现无效，
+  迁移后只有点「把本机数据上传到服务器」才会读旧数据。要种数据请用 REST（`PUT /api/wordbook`）。
+- 脚本会在页面上真的保存文章与单词，因此务必先用隔离的数据目录启动服务，别污染 `data/library.json`：
+  `$env:DATA_DIR='.tmp-e2e'; $env:PORT='3000'; npm start`，跑完删掉 `.tmp-e2e`。
+- 「清空浏览器 storage 后仍能看到服务器数据」这个场景本脚本还没覆盖，属于待补项。
+"""
+
 from playwright.sync_api import expect, sync_playwright
 
 
