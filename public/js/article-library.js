@@ -1,73 +1,43 @@
-const databaseName = 'cet6-reading-library';
-const databaseVersion = 2;
-const articleStoreName = 'articles';
-const folderStoreName = 'folders';
+import { deleteArticle as deleteArticleRemote, deleteFolder as deleteFolderRemote, fetchLibrary, putArticle, putFolder } from './library-api.js';
 
 function createId(prefix) {
   return globalThis.crypto?.randomUUID?.() ?? `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function openDatabase() {
-  if (!('indexedDB' in globalThis)) {
-    return Promise.reject(new Error('当前浏览器不支持本地文章库。'));
-  }
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(databaseName, databaseVersion);
-    request.onerror = () => reject(new Error('无法打开本地文章库。'));
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains(articleStoreName)) {
-        const store = database.createObjectStore(articleStoreName, { keyPath: 'id' });
-        store.createIndex('updatedAt', 'updatedAt');
-      }
-      if (!database.objectStoreNames.contains(folderStoreName)) {
-        const store = database.createObjectStore(folderStoreName, { keyPath: 'id' });
-        store.createIndex('createdAt', 'createdAt');
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-  });
-}
-
-async function runTransaction(storeName, mode, action) {
-  const database = await openDatabase();
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction(storeName, mode);
-    const request = action(transaction.objectStore(storeName));
-    request.onerror = () => reject(new Error('本地文章库操作失败。'));
-    request.onsuccess = () => resolve(request.result);
-    transaction.oncomplete = () => database.close();
-    transaction.onerror = () => reject(new Error('本地文章库操作失败。'));
-  });
-}
-
+// 契约与旧 IndexedDB 版本完全一致，所以 app.js 的调用点不用改：
+// 文章按 updatedAt 降序、文件夹按 createdAt 升序、getArticle 未命中 resolve undefined、
+// createFolder 解析出新文件夹 id、saveArticle 解析出落库后的记录。
 export async function listArticles() {
-  const records = await runTransaction(articleStoreName, 'readonly', (store) => store.getAll());
-  return records.sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
+  const { articles } = await fetchLibrary();
+  return [...articles].sort((left, right) => String(right.updatedAt ?? '').localeCompare(String(left.updatedAt ?? '')));
 }
 
-export function getArticle(id) {
-  return runTransaction(articleStoreName, 'readonly', (store) => store.get(id));
+export async function getArticle(id) {
+  const { articles } = await fetchLibrary();
+  return articles.find((record) => record.id === id);
 }
 
-export function saveArticle(record) {
-  return runTransaction(articleStoreName, 'readwrite', (store) => store.put(record));
+export async function saveArticle(record) {
+  const { article } = await putArticle(record);
+  return article;
 }
 
-export function deleteArticle(id) {
-  return runTransaction(articleStoreName, 'readwrite', (store) => store.delete(id));
+export async function deleteArticle(id) {
+  await deleteArticleRemote(id);
 }
 
 export async function listFolders() {
-  const records = await runTransaction(folderStoreName, 'readonly', (store) => store.getAll());
-  return records.sort((left, right) => String(left.createdAt).localeCompare(String(right.createdAt)));
+  const { folders } = await fetchLibrary();
+  return [...folders].sort((left, right) => String(left.createdAt ?? '').localeCompare(String(right.createdAt ?? '')));
 }
 
-export function createFolder(name) {
+export async function createFolder(name) {
   const folder = { id: createId('folder'), name: String(name).trim(), createdAt: new Date().toISOString() };
-  return runTransaction(folderStoreName, 'readwrite', (store) => store.put(folder));
+  await putFolder(folder);
+  // 只返回 id：app.js 用 `typeof created === 'string'` 分支处理，契约与 IDB 版一致。
+  return folder.id;
 }
 
-export function deleteFolder(id) {
-  return runTransaction(folderStoreName, 'readwrite', (store) => store.delete(id));
+export async function deleteFolder(id) {
+  await deleteFolderRemote(id);
 }
