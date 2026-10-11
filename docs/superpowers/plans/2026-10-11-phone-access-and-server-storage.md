@@ -428,6 +428,8 @@ test('迁移时文章取 updatedAt 较新的一方，文件夹按 id 覆盖', as
   const { store } = await createTemporaryStore();
   await store.putArticle({ id: 'a1', article: 'Server copy.', updatedAt: '2026-10-11T10:00:00.000Z' });
   await store.putFolder({ id: 'f1', name: '服务器文件夹', createdAt: '2026-10-11T00:00:00.000Z' });
+  // 服务器上已有一个 hello：本机同名条目必须被丢弃，否则「同词保留服务器版本」这条就测不到。
+  await store.putWordbook([{ word: 'hello', meaning: '服务器释义' }]);
 
   const result = await store.importAll({
     articles: [
@@ -447,8 +449,9 @@ test('迁移时文章取 updatedAt 较新的一方，文件夹按 id 覆盖', as
   const articles = await store.listArticles();
   assert.equal(articles.find((article) => article.id === 'a1').article, 'Server copy.');
   assert.equal(articles.find((article) => article.id === 'a2').article, 'Local fresh copy.');
-  assert.deepEqual((await store.listFolders()).map((folder) => folder.name).sort(), ['本机文件夹', '新文件夹']);
-  assert.deepEqual((await store.getWordbook()).map((entry) => entry.word), ['brandnew']);
+  // Array.prototype.sort() 按 UTF-16 码元比较：新(U+65B0) 排在 本(U+672C) 之前。
+  assert.deepEqual((await store.listFolders()).map((folder) => folder.name).sort(), ['新文件夹', '本机文件夹']);
+  assert.deepEqual(await store.getWordbook(), [{ word: 'hello', meaning: '服务器释义' }, { word: 'brandnew', meaning: '新词' }]);
 });
 
 test('迁移时单词本保留服务器已有条目，只补新词', async () => {
@@ -483,11 +486,14 @@ Expected: FAIL — `store.importAll is not a function`
 
 这两处都是「不写自己读不回来的数据」，与 Task 3 的改动同文件，一起做：
 
-1. `putWordbook` 开头加类型守卫。Task 2 复核实测：`putWordbook('hello')` 会把 `"wordbook": "hello"` 落盘，之后**每次 `getWordbook()` 都会报「wordbook 必须是数组」**，文件在手工修复前一直是坏的。这不是条目级校验（那属于 Task 5 的路由），而是守住 `normalizeDocument` 自己的读回不变量：
+1. `putWordbook` 开头加类型守卫。Task 2 复核实测：`putWordbook('hello')` 会把 `"wordbook": "hello"` 落盘，之后**每次 `getWordbook()` 都会报「wordbook 必须是数组」**，文件在手工修复前一直是坏的。这不是条目级校验（那属于 Task 5 的路由），而是守住 `normalizeDocument` 自己的读回不变量。
+
+   注意用 `Promise.reject` 而不是同步 `throw`：本仓库的测试用 `assert.rejects(() => store.putWordbook('hello'))`，而**同步 throw 不会被 `assert.rejects` 当作 rejection**（已实测：错误直接冒泡、断言失败）。其他成员都是「返回 Promise、失败即 rejection」，这里保持一致。
 
 ```js
     putWordbook(entries) {
-      if (!Array.isArray(entries)) throw new TypeError('entries 必须是数组。');
+      // 保持「返回 Promise、失败即 rejection」的接口一致性：同步 throw 会绕过 assert.rejects 与调用方的 .catch()。
+      if (!Array.isArray(entries)) return Promise.reject(new TypeError('entries 必须是数组。'));
       return mutate((current) => {
         current.wordbook = structuredClone(entries);
         return current.wordbook.length;
