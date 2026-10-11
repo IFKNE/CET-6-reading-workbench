@@ -1505,7 +1505,12 @@ async function requestJson(url, options = {}) {
   try {
     response = await fetch(url, { ...options, signal: controller.signal });
     // 计时器要一直活到读完响应体：认证门户可能先回响应头、再把响应体挂住。
-    body = await response.json().catch(() => { parsed = false; return null; });
+    body = await response.json().catch((error) => {
+      // 读响应体时被中止（超时）要和「连不上」同类，而不是「数据无法解析」。
+      if (controller.signal.aborted) throw error;
+      parsed = false;
+      return null;
+    });
   } catch {
     // 网络不可达、连接被中止（超时）都算「没连上电脑服务器」。
     setOnline(false);
@@ -1529,11 +1534,7 @@ async function requestJson(url, options = {}) {
 
 - [ ] **Step 2: 顺手收掉两处小隐患**
 
-`public/js/article-library.js` 的三处解构补默认值，避免响应缺字段时抛 `is not iterable`：
-
-```js
-  const { articles = [], folders = [] } = await fetchLibrary();
-```
+`public/js/article-library.js` 的三处解构补默认值（`listArticles` 用 `const { articles = [] } = await fetchLibrary();`，`getArticle` 同理，`listFolders` 用 `const { folders = [] } = …`），避免响应缺字段时抛 `is not iterable`。
 
 `public/js/legacy-library.js` 顶部加一段说明——它与适配层有 5 个同名导出，而仓库没有 lint，误导入不会报错：
 
@@ -1547,6 +1548,12 @@ async function requestJson(url, options = {}) {
 
 ```js
 test('单个订阅者抛错不影响其他订阅者，也不会顶掉请求错误', async () => {
+  // 模块级的 online 会在同一文件的 test 之间保留（上一个测试把它切成了离线），
+  // 先用一次成功请求复位，再断言通知循环的隔离性。
+  await withStubFetch(
+    () => new Response(JSON.stringify({ articles: [], folders: [] }), { status: 200 }),
+    () => fetchLibrary()
+  );
   const seen = [];
   let firstCall = true;
   // 初次调用不抛（否则会在订阅时就被移除），之后的每次通知都抛。
@@ -1769,8 +1776,7 @@ git commit -m "feat(web): 文章库改为服务端适配层，旧 IndexedDB 实�
 把 `public/js/app.js` 第 6 行之后追加两行导入（`article-library.js` 的导入保持原样）：
 
 ```js
-import { fetchWordbook, importLocalData, putWordbook, subscribeServerStatus } from './library-api.js';
-import { listLegacyArticles, listLegacyFolders, readLegacyWordbook } from './legacy-library.js';
+import { fetchWordbook, putWordbook } from './library-api.js';
 ```
 
 把 `state` 里的 `entries: readWordbook(),` 改为 `entries: [],`，并删除下面这两个函数（`readWordbook` 与它的 `storageKeys.wordbook` 依赖；`readHighlights` 保留不动）：
@@ -1823,10 +1829,12 @@ async function loadWordbook() {
 ```js
   localStorage.setItem(storageKeys.wordbook, JSON.stringify(state.entries));
 ```
-改为：
+改为（**注意顺序**：先把状态文案写好再 await 持久化，否则 PUT 失败时 `persistWordbook` 的 `catch` 写的错误文案会被随后的成功文案盖掉，用户看到的是「已加入单词本」而我们其实没存上）：
 ```js
+  setReaderStatus(`“${entry.word}” ${alreadySaved ? '已更新到单词本' : '已加入单词本'}`);
   await persistWordbook();
 ```
+并把原来紧随其后的那句 `setReaderStatus(...)` 删掉（文案已提前）。
 
 `updateWordEntry()` 里（原第 863 行）把同一行改为：
 ```js
@@ -1887,6 +1895,62 @@ git commit -m "feat(web): 单词本改由服务端持久化并在启动时拉取
 
 ---
 
+## Task 9b: 请求超时的分类修正（Task 8b/9 复核结论）
+
+**Files:** modify `public/js/library-api.js`
+
+- [ ] **Step 1: 读响应体时被中止应算「未连接」**
+
+Task 8b 把计时器延长到覆盖 `response.json()`，但那次中止被内层 `.catch` 吞成了 `parsed = false`，于是会报「服务器返回了无法解析的数据」并把状态判成在线——而实际上根本没读到我们的服务器。区分开：
+
+```js
+    response = await fetch(url, { ...options, signal: controller.signal });
+    // 计时器要一直活到读完响应体：认证门户可能先回响应头、再把响应体挂住。
+    body = await response.json().catch((error) => {
+      // 读响应体时被中止（超时）要和「连不上」同类，而不是「数据无法解析」。
+      if (controller.signal.aborted) throw error;
+      parsed = false;
+      return null;
+    });
+```
+
+- [ ] **Step 2: 用测试钉住分类**
+
+```js
+test('读响应体时超时被中止，按「未连接」而不是「数据无法解析」处理', async () => {
+  const seen = [];
+  await withStubFetch(
+    () => new Response(JSON.stringify({ articles: [], folders: [] }), { status: 200 }),
+    () => fetchLibrary()
+  );
+  const unsubscribe = subscribeServerStatus((online) => seen.push(online));
+  // 响应头已经拿到，但响应体读取被中止——等价于门户/弱网把响应体挂住直至超时。
+  await withStubFetch(
+    () => ({
+      ok: true,
+      json: async () => { throw new DOMException('Aborted', 'AbortError'); }
+    }),
+    async () => {
+      await assert.rejects(() => fetchLibrary(), { message: /未连接到电脑服务器/ });
+    }
+  );
+  unsubscribe();
+  assert.deepEqual(seen, [true, false]);
+});
+```
+
+- [ ] **Step 3: 运行测试 + 提交**
+
+Run: `node --test --test-isolation=none test/library-api-client.test.js`
+Expected: PASS（10 个 test 全绿）
+
+```bash
+git add public/js/library-api.js test/library-api-client.test.js
+git commit -m "fix(web): 读响应体时的超时按未连接处理，并补分类测试"
+```
+
+---
+
 ## Task 10: 迁移入口与断连提示条
 
 **Files:**
@@ -1926,6 +1990,13 @@ html[data-theme="dark"] .library-sync { background: rgba(255, 255, 255, .04); }
 ```
 
 - [ ] **Step 3: 接线 `app.js`**
+
+先补本任务才需要的导入（Task 9 只导入了 `fetchWordbook` 与 `putWordbook`，避免死导入）：
+
+```js
+import { importLocalData, subscribeServerStatus } from './library-api.js';
+import { listLegacyArticles, listLegacyFolders, readLegacyWordbook } from './legacy-library.js';
+```
 
 在 `elements` 对象里 `libraryMount` 之后补三个元素引用：
 
