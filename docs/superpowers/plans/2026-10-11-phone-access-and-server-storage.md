@@ -1955,6 +1955,134 @@ git commit -m "fix(web): 读响应体时的超时按未连接处理，并补分�
 
 ---
 
+## Task 9c: 单词本写入门禁与可见错误（Task 9 复核结论，数据安全）
+
+**Files:** modify `public/js/app.js`、`public/js/article-library.js`
+
+复核实测出的真实风险：启动拉取失败时 `state.entries = []`，错误文案只写进精读页的 `#reader-status`（粘贴页不可见），用户看到的是「空单词本、没有任何报错」；之后他存任意一个词，`PUT /api/wordbook` 是**整表替换**，服务器上的整个单词本就被这一个词覆盖了。启动拉取与用户存词的竞态同样会丢词。必须：拉取未成功前**拒绝写入**，并且把失败**显示在单词本界面里**。
+
+- [ ] **Step 1: 加状态与门禁**
+
+`state` 里加两个字段：
+
+```js
+  entries: [],
+  wordbookError: '',
+  wordbookStatus: 'loading',
+```
+
+把 Task 9 的 `persistWordbook` / `loadWordbook` 换成下面这版（`ensureWordbookLoaded` 保证只拉取一次；写入串在拉取之后取快照）：
+
+```js
+let wordbookWriteChain = Promise.resolve();
+let wordbookLoadPromise = null;
+
+function ensureWordbookLoaded() {
+  if (!wordbookLoadPromise) wordbookLoadPromise = loadWordbook();
+  return wordbookLoadPromise;
+}
+
+function setWordbookError(message) {
+  state.wordbookError = message || '';
+  renderWordbook();
+}
+
+// 写入串行化 + 快照：旧响应晚到也不会用过期数据覆盖新数据。
+function persistWordbook() {
+  wordbookWriteChain = wordbookWriteChain
+    .catch(() => {})
+    .then(async () => {
+      // 先等首次拉取落地：否则可能拿着空数组去整表替换服务器上的单词本。
+      await ensureWordbookLoaded();
+      if (state.wordbookStatus !== 'ready') {
+        // 拉取没成功就绝不写：PUT 是整表替换，写下去等于把服务器上的单词本清空。
+        throw new Error('单词本没能从电脑服务器读到，这次改动没有保存。');
+      }
+      // 快照在等待之后取：拉取期间用户新加的词也在里面。
+      await putWordbook(JSON.parse(JSON.stringify(state.entries)));
+      state.wordbookError = '';
+    })
+    .catch((error) => setWordbookError(error.message));
+  return wordbookWriteChain;
+}
+
+async function loadWordbook() {
+  try {
+    const { entries } = await fetchWordbook();
+    const serverEntries = Array.isArray(entries) ? entries : [];
+    // 拉取期间用户可能已经存了词：按词形合并，服务器条目优先、本机新增的保留。
+    const merged = [...serverEntries];
+    for (const entry of state.entries) {
+      if (!merged.some((item) => wordKey(item?.word) === wordKey(entry?.word))) merged.push(entry);
+    }
+    state.entries = merged;
+    state.wordbookStatus = 'ready';
+    state.wordbookError = '';
+  } catch (error) {
+    // 不把 entries 清空成「一本空单词本」的样子：那是骗人的，而且会诱导下一次整表覆盖。
+    state.wordbookStatus = 'failed';
+    state.wordbookError = error.message;
+    setReaderStatus(error.message);
+  }
+  renderWordbook();
+}
+```
+
+- [ ] **Step 2: 让错误在单词本界面上可见**
+
+`renderWordbook()` 里，`elements.wordbookList.replaceChildren();` 之后补：
+
+```js
+  // 读/写失败必须显示在单词本自己这里：以前只写进 #reader-status，
+  // 而那个元素在粘贴页是隐藏的，用户只会看到一本「空单词本」。
+  if (state.wordbookError && state.entries.length > 0) {
+    elements.wordbookList.append(createElement('p', 'book-empty wordbook-error', state.wordbookError));
+  }
+```
+
+空态文案改成优先显示错误：
+
+```js
+    const message = state.wordbookError
+      ? state.wordbookError
+      : state.entries.length === 0
+        ? '这里还没有单词。阅读时点击任意单词，再选择“加入单词本”。'
+        : state.sourceSelection.all
+          ? '当前搜索或状态筛选下没有单词。'
+          : `“${describeSelection(state.sourceSelection, tree, state.entries, state.libraryIndex.articles).label}”下没有匹配的单词。`;
+```
+
+- [ ] **Step 3: 启动时走门禁，并清掉两处死代码**
+
+文件末尾的 `await loadWordbook();` 改成：
+
+```js
+await ensureWordbookLoaded();
+```
+
+另外删掉 `storageKeys` 里已经没人读的 `wordbook: 'cet6:wordbook',`（迁移用的键在 `legacy-library.js` 里另有一份），以及 `article-library.js` 的 `listArticles` 里那个没用到的 `folders` 绑定：
+
+```js
+  const { articles = [] } = await fetchLibrary();
+```
+
+- [ ] **Step 4: 静态验证 + 提交**
+
+Run:
+```powershell
+node --check public/js/app.js
+Select-String -Path public/js/app.js -Pattern 'wordbookStatus|wordbookError|ensureWordbookLoaded' | Measure-Object
+node --test --test-isolation=none
+```
+Expected: 语法通过；门禁三处符号都在；150 个测试仍全绿（本任务没有 DOM 测试环境，逻辑靠静态检查与 Task 13 的手机实测覆盖）。
+
+```bash
+git add public/js/app.js public/js/article-library.js
+git commit -m "fix(web): 拉取成功前拒绝写入单词本，并让失败在单词本界面可见"
+```
+
+---
+
 ## Task 10: 迁移入口与断连提示条
 
 **Files:**
