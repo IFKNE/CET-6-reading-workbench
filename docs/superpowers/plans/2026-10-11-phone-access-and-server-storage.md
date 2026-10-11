@@ -900,7 +900,7 @@ Expected: FAIL — 新增的 2 个 test 返回 404
     try {
       return res.json({ ok: true, saved: await store.putWordbook(entries) });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '单词本保存失败。' });
+      return res.status(error instanceof TypeError ? 400 : 500).json({ error: error.message || '单词本保存失败。' });
     }
   });
 
@@ -915,7 +915,9 @@ Expected: FAIL — 新增的 2 个 test 返回 404
     try {
       return res.json({ imported: await store.importAll({ articles, folders, wordbook }) });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '数据迁移失败。' });
+      // 存储层的类型守卫抛的是 TypeError，那是「参数不合法」而不是「服务出错」，
+      // 直接映射成 400，别让客户端收到一个带 400 文案的 500。
+      return res.status(error instanceof TypeError ? 400 : 500).json({ error: error.message || '数据迁移失败。' });
     }
   });
 ```
