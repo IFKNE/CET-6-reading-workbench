@@ -308,6 +308,15 @@ test('文档形状或版本不合法时同样报错，且不改写文件', async
   assert.equal(await fs.readFile(path.join(dataDir, 'library.json'), 'utf8'), original);
 });
 
+test('putArticle 的返回值也是副本，改它不会写进存储', async () => {
+  // 返回值若引用内部状态，调用方改一下就只改了内存、没改磁盘，
+  // 下一次成功写入会把它带上盘——和 Task 1 修掉的“内存领先磁盘”是同一类问题。
+  const { store } = await createTemporaryStore();
+  const saved = await store.putArticle({ id: 'a1', article: 'One.', updatedAt: '2026-10-11T00:00:00.000Z' });
+  saved.article = '被调用方改了';
+  assert.equal((await store.getArticle('a1')).article, 'One.');
+});
+
 test('删除文件夹会把其中文章解绑为未归档并计数', async () => {
   // 注入固定时钟：断言解绑时确实盖了当前时间，而不是靠“不等于旧值”这种弱断言。
   const stamp = '2026-10-11T02:00:00.000Z';
@@ -351,11 +360,14 @@ test('并发写入被串行化，结果全部保留且文件仍可解析', async
 - [ ] **Step 2: 运行测试确认失败**
 
 Run: `node --test test/store.test.js`
-Expected: FAIL — `store.putFolder is not a function`（以及单词本相关失败）
+Expected: FAIL — `store.putFolder is not a function`（以及单词本相关失败）。
+注意：「文档形状或版本不合法」这条属于 Task 1 已实现的行为，此时**应当直接通过**，它的失败反而是问题信号。
 
 - [ ] **Step 3: 补齐实现**
 
-把 `server/store.js` 中 `return { ... }` 里 `deleteArticle` 之后补上文件夹与单词本方法（`mutate`/`persist`/`load` 已在 Task 1 写好，无需改动）：
+先修一个复核发现的返回引用问题：把 `putArticle` 的 `return record;` 改成 `return structuredClone(record);`（Task 1 复核 Important #2：当前返回值是内部对象的引用，调用方改它会只改内存不改磁盘，属于「内存领先磁盘」的同一类问题）。
+
+然后把 `server/store.js` 中 `return { ... }` 里 `deleteArticle` 之后补上文件夹与单词本方法（`mutate`/`persist`/`load` 已在 Task 1 写好，无需改动）：
 
 ```js
     putFolder(folder) {
@@ -364,7 +376,7 @@ Expected: FAIL — `store.putFolder is not a function`（以及单词本相关�
         const index = current.folders.findIndex((item) => item.id === folder.id);
         if (index === -1) current.folders.push(record);
         else current.folders[index] = record;
-        return record;
+        return structuredClone(record);
       });
     },
     deleteFolder(id) {
@@ -390,7 +402,7 @@ Expected: FAIL — `store.putFolder is not a function`（以及单词本相关�
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `node --test --test-isolation=none test/store.test.js`
-Expected: PASS（12 个 test 全绿）
+Expected: PASS（13 个 test 全绿）
 
 - [ ] **Step 5: 提交**
 
