@@ -2460,6 +2460,35 @@ Invoke-RestMethod -Method Put -Uri http://127.0.0.1:3000/api/wordbook -ContentTy
 
 ---
 
+## 交付记录（2026-10-11）
+
+**已完成**（Task 1–12，含过程中按复核结论追加的 6b / 7b / 8b / 9b / 9c）：
+
+- 服务端：`server/store.js`（懒加载 + 原子写 + 副本写盘 + 形状/版本校验）、`server/app.js`（8 个 REST 路由 + 统一状态码规则）、`server/index.js`（默认只监听 `127.0.0.1`）、`.env.example`、`.gitignore` 忽略 `data/`。
+- 前端：`public/js/library-api.js`（HTTP 客户端 + 超时 + 在线状态）、`public/js/article-library.js`（服务端适配层，契约与旧 IndexedDB 版一致）、`public/js/legacy-library.js`（旧实现留存供迁移）、`public/js/app.js`（单词本服务端持久化 + 写入门禁 + 迁移入口 + 断连提示条）。
+- PWA：`public/manifest.webmanifest` + 三个图标 + head 元信息；README 重写为手机访问手册。
+- 测试：150 个（`node --test --test-isolation=none`；本机直接 `npm test` 亦可）。端到端：写入 → 重启服务 → 数据仍在，已实测。
+
+**过程中被复核抓出并修掉的真问题**（都是「修了才算数」的）：
+
+1. `mutate` 先改内存再落盘 → 落盘失败后内存领先磁盘，后续写入会把已报失败的改动带上盘（`efe1d46`）。
+2. `putWordbook` 能写出自己读不回来的文档，一次坏调用让整库打不开（`21d0d63`）。
+3. 状态码规则按 `instanceof TypeError` 猜，会把 `fetch` 网络故障报成 400（`34db56e`）。
+4. `find()` 返回元素本身，`[null]` 词条绕过校验被落盘（`4c6d21a`）。
+5. 启动拉取失败时把 `state.entries` 置空且错误不可见，下一次整表 PUT 会清空服务器单词本（`b4ab9fa`，已用 harness 复现并证明门禁拦住）。
+
+**尚未做（按优先级）**：
+
+1. **单词本改为增量接口**：现在 `PUT /api/wordbook` 是整份覆盖，同一时刻只能在一台设备上改（文章不受影响）。建议改成 `PUT/DELETE /api/wordbook/:word`，或让 `GET` 返回 `rev` 并在 `PUT` 带旧 `rev` 时回 409 后重取合并。已有 README「已知限制」兜底。
+2. `test/e2e.py` 已过时（还在往 localStorage 种单词本），且会在真实数据目录里写数据；已在文件头标注，需要重写或按 REST 重做。
+3. `POST /api/wordbook.docx` 的错误分支没有测试（`createWordbookDocument` 目前不会带 `statusCode`，属一致性改动）。
+4. `server/index.js` 的回环判断是精确字符串比较，`HOST=localhost` / `::1` 会打出误导性的「同网设备可访问」提示。
+5. `legacy-library.js` 有 5 个与适配层同名的未用导出，目前只靠文件头注释约束；建议直接删掉那几个导出。
+6. `app.js` 没有 DOM 测试环境，单词本门禁逻辑目前靠外部 harness 验证。
+
+
+---
+
 ## Self-Review 记录
 
 **Spec 覆盖检查**
