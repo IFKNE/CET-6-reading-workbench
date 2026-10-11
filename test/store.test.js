@@ -208,3 +208,21 @@ test('deleteFolder 收到空 id 时不动「未归档」的文章', async () => 
   assert.deepEqual(await store.deleteFolder(''), { detached: 0 });
   assert.equal((await store.getArticle('a1')).updatedAt, '2026-10-11T00:00:00.000Z');
 });
+
+test('importAll 参数不是数组时拒绝，不会写出坏文档', async () => {
+  const { dataDir, store } = await createTemporaryStore();
+  // 不加守卫时会返回 { folders: 2 } 并把裸字符串写进 folders（'ab' 被当作可遍历对象）。
+  await assert.rejects(() => store.importAll({ folders: 'ab' }), { message: /folders 必须是数组/ });
+  await assert.rejects(() => store.importAll({ articles: 'x' }), { message: /articles 必须是数组/ });
+  assert.deepEqual(await createStore({ dataDir }).listFolders(), []);
+});
+
+test('迁移时 updatedAt 相同则保留服务器版本', async () => {
+  // Task 5 的「重复迁移返回 0」依赖这条平局规则，先在存储层钉住它。
+  const { store } = await createTemporaryStore();
+  const stamp = '2026-10-11T00:00:00.000Z';
+  await store.putArticle({ id: 'a1', article: 'Server copy.', updatedAt: stamp });
+  const result = await store.importAll({ articles: [{ id: 'a1', article: 'Local copy.', updatedAt: stamp }] });
+  assert.equal(result.articles, 0);
+  assert.equal((await store.getArticle('a1')).article, 'Server copy.');
+});

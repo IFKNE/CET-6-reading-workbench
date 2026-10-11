@@ -135,8 +135,13 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
       });
     },
     importAll({ articles = [], folders = [], wordbook = [] } = {}) {
+      // 与 putWordbook 同一条理由：参数不是数组就拒绝，别把字符串当数组遍历后写进库。
+      for (const [name, value] of [['articles', articles], ['folders', folders], ['wordbook', wordbook]]) {
+        if (!Array.isArray(value)) return Promise.reject(new TypeError(`${name} 必须是数组。`));
+      }
       return mutate((current) => {
         let importedArticles = 0;
+        let importedFolders = 0;
         let importedWordbook = 0;
 
         for (const folder of folders) {
@@ -144,6 +149,9 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
           const index = current.folders.findIndex((item) => item.id === folder.id);
           if (index === -1) current.folders.push(record);
           else current.folders[index] = record;
+          // 三个计数都是「真正落库的条数」，而不是入参长度：
+          // 否则重复点迁移按钮会永远返回非 0，调用方无法判断这次到底有没有改动。
+          importedFolders += 1;
         }
 
         for (const article of articles) {
@@ -172,7 +180,7 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
           importedWordbook += 1;
         }
 
-        return { articles: importedArticles, folders: folders.length, wordbook: importedWordbook };
+        return { articles: importedArticles, folders: importedFolders, wordbook: importedWordbook };
       });
     }
   };
