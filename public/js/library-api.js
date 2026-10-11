@@ -41,7 +41,13 @@ async function requestJson(url, options = {}) {
   try {
     response = await fetch(url, { ...options, signal: controller.signal });
     // 计时器要一直活到读完响应体：认证门户可能先回响应头、再把响应体挂住。
-    body = await response.json().catch(() => { parsed = false; return null; });
+    body = await response.json().catch((error) => {
+      // 读响应体时被中止（超时）要和「连不上」同类，而不是「数据无法解析」。
+      // signal.aborted 只在计时器到点时为真；body 读取本身抛 AbortError 也是同一种中止。
+      if (controller.signal.aborted || error?.name === 'AbortError') throw error;
+      parsed = false;
+      return null;
+    });
   } catch {
     // 网络不可达、连接被中止（超时）都算「没连上电脑服务器」。
     setOnline(false);

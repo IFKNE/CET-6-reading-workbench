@@ -152,3 +152,24 @@ test('单个订阅者抛错不影响其他订阅者，也不会顶掉请求错�
   unsubscribeGood();
   assert.deepEqual(seen, [true, false]);
 });
+
+test('读响应体时超时被中止，按「未连接」而不是「数据无法解析」处理', async () => {
+  const seen = [];
+  await withStubFetch(
+    () => new Response(JSON.stringify({ articles: [], folders: [] }), { status: 200 }),
+    () => fetchLibrary()
+  );
+  const unsubscribe = subscribeServerStatus((online) => seen.push(online));
+  // 响应头已经拿到，但响应体读取被中止——等价于门户/弱网把响应体挂住直至超时。
+  await withStubFetch(
+    () => ({
+      ok: true,
+      json: async () => { throw new DOMException('Aborted', 'AbortError'); }
+    }),
+    async () => {
+      await assert.rejects(() => fetchLibrary(), { message: /未连接到电脑服务器/ });
+    }
+  );
+  unsubscribe();
+  assert.deepEqual(seen, [true, false]);
+});

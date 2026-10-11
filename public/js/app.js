@@ -867,9 +867,10 @@ async function saveWord(entry) {
     count: countWordInArticle(state.article, entry.word)
   } : undefined;
   state.entries = addOrUpdateWord(state.entries, { ...entry, savedAt, source });
+  // 先写成功文案再 await 持久化：否则 PUT 失败时 persistWordbook 的 catch 写的错误文案会被这句盖掉。
+  setReaderStatus(`“${entry.word}” ${alreadySaved ? '已更新到单词本' : '已加入单词本'}`);
   await persistWordbook();
   renderWordbook();
-  setReaderStatus(`“${entry.word}” ${alreadySaved ? '已更新到单词本' : '已加入单词本'}`);
   return { added: !alreadySaved, word: normalizeWord(entry.word) };
 }
 
