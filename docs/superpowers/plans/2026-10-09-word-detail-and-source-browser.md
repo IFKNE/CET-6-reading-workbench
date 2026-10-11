@@ -1741,7 +1741,7 @@ git commit -m "test(e2e): 覆盖来源筛选面板开合"
 
 验证方式与结果：
 
-- `node test/*.test.js` 逐文件运行：12 个文件、90 项全部通过（`node --test` 在本沙箱因 `spawn EPERM` 不可用）。
+- `node test/*.test.js` 逐文件运行：本计划完成时 12 个文件、90 项全部通过（`node --test` 在本沙箱因 `spawn EPERM` 不可用）；后续特性又追加到 13 个文件、106 项。
 - 行为验证用「仓库外临时目录里的假 DOM 探针」（自建 `document`/`window`/`localStorage`/`indexedDB` 桩，import 真实 `app.js`）：
   - 详情链路探针 8/8 通过，且在修复前的代码上恰好 3 条失败（证明探针能捕获该缺陷）；
   - 来源筛选探针 25/25 通过，并用「把 `index.html` 回退成旧控件」的反向对照复现了初始化 `TypeError`。
