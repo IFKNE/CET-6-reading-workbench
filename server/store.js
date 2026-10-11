@@ -90,7 +90,7 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
         const index = current.articles.findIndex((item) => item.id === article.id);
         if (index === -1) current.articles.push(record);
         else current.articles[index] = record;
-        return record;
+        return structuredClone(record);
       });
     },
     deleteArticle(id) {
@@ -98,6 +98,33 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
         const before = current.articles.length;
         current.articles = current.articles.filter((article) => article.id !== id);
         return { removed: before - current.articles.length };
+      });
+    },
+    putFolder(folder) {
+      return mutate((current) => {
+        const record = structuredClone(folder);
+        const index = current.folders.findIndex((item) => item.id === folder.id);
+        if (index === -1) current.folders.push(record);
+        else current.folders[index] = record;
+        return structuredClone(record);
+      });
+    },
+    deleteFolder(id) {
+      return mutate((current) => {
+        current.folders = current.folders.filter((folder) => folder.id !== id);
+        let detached = 0;
+        current.articles = current.articles.map((article) => {
+          if (article.folderId !== id) return article;
+          detached += 1;
+          return { ...article, folderId: '', updatedAt: now() };
+        });
+        return { detached };
+      });
+    },
+    putWordbook(entries) {
+      return mutate((current) => {
+        current.wordbook = structuredClone(entries);
+        return current.wordbook.length;
       });
     }
   };

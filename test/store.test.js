@@ -76,3 +76,83 @@ test('落盘失败时内存不领先磁盘，后续写入不会把失败的改�
   const onDisk = JSON.parse(await fs.readFile(path.join(dataDir, 'library.json'), 'utf8'));
   assert.deepEqual(onDisk.articles.map((item) => item.id).sort(), ['a1', 'a2', 'a3']);
 });
+
+test('写入是原子的：落盘后不残留临时文件，且文件是合法 JSON', async () => {
+  const { dataDir, store } = await createTemporaryStore();
+  await store.putArticle({ id: 'a1', article: 'Atomic write.', updatedAt: '2026-10-11T00:00:00.000Z' });
+  const files = await fs.readdir(dataDir);
+  assert.deepEqual(files, ['library.json']);
+  const parsed = JSON.parse(await fs.readFile(path.join(dataDir, 'library.json'), 'utf8'));
+  assert.equal(parsed.articles.length, 1);
+  assert.equal(parsed.version, 1);
+});
+
+test('文件损坏时抛错，且不改写原文件', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cet6-store-broken-'));
+  const broken = '{ 这不是 JSON';
+  await fs.writeFile(path.join(dataDir, 'library.json'), broken, 'utf8');
+  const store = createStore({ dataDir });
+  await assert.rejects(() => store.listArticles(), { message: /无法解析/ });
+  await assert.rejects(() => store.putArticle({ id: 'a1', article: 'x' }), { message: /无法解析/ });
+  assert.equal(await fs.readFile(path.join(dataDir, 'library.json'), 'utf8'), broken);
+});
+
+test('文档形状或版本不合法时同样报错，且不改写文件', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cet6-store-shape-'));
+  const original = JSON.stringify({ version: 1, articles: 'oops', folders: [], wordbook: [] });
+  await fs.writeFile(path.join(dataDir, 'library.json'), original, 'utf8');
+  await assert.rejects(() => createStore({ dataDir }).listArticles(), { message: /无法解析/ });
+
+  const versioned = await fs.mkdtemp(path.join(os.tmpdir(), 'cet6-store-version-'));
+  await fs.writeFile(path.join(versioned, 'library.json'), JSON.stringify({ version: 2, articles: [], folders: [], wordbook: [] }), 'utf8');
+  await assert.rejects(() => createStore({ dataDir: versioned }).listArticles(), { message: /不支持的文档版本/ });
+  assert.equal(await fs.readFile(path.join(dataDir, 'library.json'), 'utf8'), original);
+});
+
+test('putArticle 的返回值也是副本，改它不会写进存储', async () => {
+  // 返回值若引用内部状态，调用方改一下就只改了内存、没改磁盘，
+  // 下一次成功写入会把它带上盘——和 Task 1 修掉的“内存领先磁盘”是同一类问题。
+  const { store } = await createTemporaryStore();
+  const saved = await store.putArticle({ id: 'a1', article: 'One.', updatedAt: '2026-10-11T00:00:00.000Z' });
+  saved.article = '被调用方改了';
+  assert.equal((await store.getArticle('a1')).article, 'One.');
+});
+
+test('删除文件夹会把其中文章解绑为未归档并计数', async () => {
+  // 注入固定时钟：断言解绑时确实盖了当前时间，而不是靠“不等于旧值”这种弱断言。
+  const stamp = '2026-10-11T02:00:00.000Z';
+  const { store } = await createTemporaryStore({ now: () => stamp });
+  await store.putFolder({ id: 'f1', name: '真题听力', createdAt: '2026-10-11T00:00:00.000Z' });
+  await store.putArticle({ id: 'a1', article: 'One.', folderId: 'f1', updatedAt: '2026-10-11T00:00:00.000Z' });
+  await store.putArticle({ id: 'a2', article: 'Two.', folderId: 'f1', updatedAt: '2026-10-11T00:00:00.000Z' });
+  await store.putArticle({ id: 'a3', article: 'Three.', folderId: '', updatedAt: '2026-10-11T00:00:00.000Z' });
+
+  assert.deepEqual(await store.listFolders(), [{ id: 'f1', name: '真题听力', createdAt: '2026-10-11T00:00:00.000Z' }]);
+  const result = await store.deleteFolder('f1');
+  assert.equal(result.detached, 2);
+  assert.deepEqual(await store.listFolders(), []);
+  const articles = await store.listArticles();
+  assert.deepEqual(articles.map((article) => article.folderId), ['', '', '']);
+  // 解绑会刷新 updatedAt，否则手机/电脑合并时这条改动可能被判为“不更新”。
+  assert.deepEqual(articles.filter((article) => article.id !== 'a3').map((article) => article.updatedAt), [stamp, stamp]);
+  assert.equal(articles.find((article) => article.id === 'a3').updatedAt, '2026-10-11T00:00:00.000Z');
+});
+
+test('单词本是整体替换', async () => {
+  const { store } = await createTemporaryStore();
+  await store.putWordbook([{ word: 'hello', meaning: '你好' }, { word: 'world', meaning: '世界' }]);
+  assert.deepEqual((await store.getWordbook()).map((entry) => entry.word), ['hello', 'world']);
+  await store.putWordbook([{ word: 'hello', meaning: '你好（改）' }]);
+  assert.deepEqual(await store.getWordbook(), [{ word: 'hello', meaning: '你好（改）' }]);
+});
+
+test('并发写入被串行化，结果全部保留且文件仍可解析', async () => {
+  const { dataDir, store } = await createTemporaryStore();
+  await Promise.all(Array.from({ length: 10 }, (_, index) => store.putArticle({
+    id: `a${index}`, article: `Article ${index}.`, updatedAt: '2026-10-11T00:00:00.000Z'
+  })));
+  const articles = await store.listArticles();
+  assert.equal(articles.length, 10);
+  const parsed = JSON.parse(await fs.readFile(path.join(dataDir, 'library.json'), 'utf8'));
+  assert.equal(parsed.articles.length, 10);
+});
