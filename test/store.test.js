@@ -156,3 +156,55 @@ test('并发写入被串行化，结果全部保留且文件仍可解析', async
   const parsed = JSON.parse(await fs.readFile(path.join(dataDir, 'library.json'), 'utf8'));
   assert.equal(parsed.articles.length, 10);
 });
+
+test('迁移时文章取 updatedAt 较新的一方，文件夹按 id 覆盖', async () => {
+  const { store } = await createTemporaryStore();
+  await store.putArticle({ id: 'a1', article: 'Server copy.', updatedAt: '2026-10-11T10:00:00.000Z' });
+  await store.putFolder({ id: 'f1', name: '服务器文件夹', createdAt: '2026-10-11T00:00:00.000Z' });
+  // 服务器上已经有 'hello'：本机那条「旧释义」不该覆盖它（与文章取 updatedAt 较新者同理）。
+  await store.putWordbook([{ word: 'hello', meaning: '服务器释义' }]);
+
+  const result = await store.importAll({
+    articles: [
+      { id: 'a1', article: 'Local stale copy.', updatedAt: '2026-10-11T09:00:00.000Z' },
+      { id: 'a2', article: 'Local fresh copy.', updatedAt: '2026-10-11T11:00:00.000Z' }
+    ],
+    folders: [
+      { id: 'f1', name: '本机文件夹', createdAt: '2026-10-11T00:00:00.000Z' },
+      { id: 'f2', name: '新文件夹', createdAt: '2026-10-11T00:00:00.000Z' }
+    ],
+    wordbook: [{ word: 'hello', meaning: '本机旧释义' }, { word: 'brandnew', meaning: '新词' }]
+  });
+
+  assert.equal(result.articles, 1);
+  assert.equal(result.folders, 2);
+  assert.equal(result.wordbook, 1);
+  const articles = await store.listArticles();
+  assert.equal(articles.find((article) => article.id === 'a1').article, 'Server copy.');
+  assert.equal(articles.find((article) => article.id === 'a2').article, 'Local fresh copy.');
+  // .sort() 按 UTF-16 码元排序：'新'(U+65B0) 在 '本'(U+672C) 之前。
+  assert.deepEqual((await store.listFolders()).map((folder) => folder.name).sort(), ['新文件夹', '本机文件夹']);
+  assert.deepEqual((await store.getWordbook()).map((entry) => entry.word), ['hello', 'brandnew']);
+});
+
+test('迁移时单词本保留服务器已有条目，只补新词', async () => {
+  const { store } = await createTemporaryStore();
+  await store.putWordbook([{ word: 'hello', meaning: '服务器释义', learningStatus: 'known' }]);
+  const result = await store.importAll({ wordbook: [{ word: 'HELLO', meaning: '本机释义' }, { word: '', meaning: '坏数据' }] });
+  assert.equal(result.wordbook, 0);
+  assert.deepEqual(await store.getWordbook(), [{ word: 'hello', meaning: '服务器释义', learningStatus: 'known' }]);
+});
+
+test('putWordbook 拒绝非数组，不会写出自己读不回来的文档', async () => {
+  const { dataDir, store } = await createTemporaryStore();
+  await assert.rejects(() => store.putWordbook('hello'), { message: /entries 必须是数组/ });
+  // 关键：拒绝之后文件仍然可读——否则整库会因为一次坏调用变成打不开的状态。
+  assert.deepEqual(await createStore({ dataDir }).getWordbook(), []);
+});
+
+test('deleteFolder 收到空 id 时不动「未归档」的文章', async () => {
+  const { store } = await createTemporaryStore();
+  await store.putArticle({ id: 'a1', article: 'One.', folderId: '', updatedAt: '2026-10-11T00:00:00.000Z' });
+  assert.deepEqual(await store.deleteFolder(''), { detached: 0 });
+  assert.equal((await store.getArticle('a1')).updatedAt, '2026-10-11T00:00:00.000Z');
+});

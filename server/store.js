@@ -110,21 +110,69 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
       });
     },
     deleteFolder(id) {
+      // 空 id 会让「未归档」（folderId === ''）的文章全部被误判成成员。
+      if (!id) return Promise.resolve({ detached: 0 });
       return mutate((current) => {
         current.folders = current.folders.filter((folder) => folder.id !== id);
+        const stamp = now();
         let detached = 0;
         current.articles = current.articles.map((article) => {
           if (article.folderId !== id) return article;
           detached += 1;
-          return { ...article, folderId: '', updatedAt: now() };
+          return { ...article, folderId: '', updatedAt: stamp };
         });
         return { detached };
       });
     },
     putWordbook(entries) {
+      // 非数组必须在落盘前拒绝：一旦写成 {"wordbook": "hello"}，normalizeDocument 之后
+      // 每一次读取都会判定文档损坏，整库要手工修文件才能再打开。
+      // 返回 rejected Promise（而非同步 throw），与其它成员的 await 调用方式保持一致。
+      if (!Array.isArray(entries)) return Promise.reject(new TypeError('entries 必须是数组。'));
       return mutate((current) => {
         current.wordbook = structuredClone(entries);
         return current.wordbook.length;
+      });
+    },
+    importAll({ articles = [], folders = [], wordbook = [] } = {}) {
+      return mutate((current) => {
+        let importedArticles = 0;
+        let importedWordbook = 0;
+
+        for (const folder of folders) {
+          const record = structuredClone(folder);
+          const index = current.folders.findIndex((item) => item.id === folder.id);
+          if (index === -1) current.folders.push(record);
+          else current.folders[index] = record;
+        }
+
+        for (const article of articles) {
+          const record = structuredClone(article);
+          const index = current.articles.findIndex((item) => item.id === article.id);
+          if (index === -1) {
+            current.articles.push(record);
+            importedArticles += 1;
+            continue;
+          }
+          // 冲突时以 updatedAt 较新者为准，避免本机旧数据覆盖服务器上的新编辑。
+          const existing = current.articles[index];
+          if (String(article.updatedAt ?? '').localeCompare(String(existing.updatedAt ?? '')) > 0) {
+            current.articles[index] = record;
+            importedArticles += 1;
+          }
+        }
+
+        const known = new Set(current.wordbook.map((entry) => String(entry?.word ?? '').toLowerCase()));
+        for (const entry of wordbook) {
+          const key = String(entry?.word ?? '').toLowerCase();
+          // 同词条目保留服务器版本：它可能带着学习状态、标签与已生成档案，比本机旧释义更值钱。
+          if (!key || known.has(key)) continue;
+          known.add(key);
+          current.wordbook.push(structuredClone(entry));
+          importedWordbook += 1;
+        }
+
+        return { articles: importedArticles, folders: folders.length, wordbook: importedWordbook };
       });
     }
   };
