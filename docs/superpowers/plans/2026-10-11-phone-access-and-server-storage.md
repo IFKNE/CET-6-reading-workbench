@@ -572,7 +572,7 @@ Expected: FAIL — `store.importAll is not a function`
 - [ ] **Step 5: 运行测试确认通过**
 
 Run: `node --test --test-isolation=none test/store.test.js`
-Expected: PASS（16 个 test 全绿）
+Expected: PASS（17 个 test 全绿：13 既有 + 4 新增）
 
 - [ ] **Step 6: 提交**
 
