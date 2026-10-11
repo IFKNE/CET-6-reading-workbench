@@ -184,7 +184,7 @@ test('迁移时文章取 updatedAt 较新的一方，文件夹按 id 覆盖', as
   assert.equal(articles.find((article) => article.id === 'a2').article, 'Local fresh copy.');
   // .sort() 按 UTF-16 码元排序：'新'(U+65B0) 在 '本'(U+672C) 之前。
   assert.deepEqual((await store.listFolders()).map((folder) => folder.name).sort(), ['新文件夹', '本机文件夹']);
-  assert.deepEqual((await store.getWordbook()).map((entry) => entry.word), ['hello', 'brandnew']);
+  assert.deepEqual(await store.getWordbook(), [{ word: 'hello', meaning: '服务器释义' }, { word: 'brandnew', meaning: '新词' }]);
 });
 
 test('迁移时单词本保留服务器已有条目，只补新词', async () => {
