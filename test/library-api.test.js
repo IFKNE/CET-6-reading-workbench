@@ -117,6 +117,13 @@ test('单词本 GET / PUT 往返，并校验条目', async () => {
   const badEntry = await request(app).put('/api/wordbook').send({ entries: [{ meaning: '没有词形' }] });
   assert.equal(badEntry.status, 400);
   assert.match(badEntry.body.error, /word/);
+
+  // find() 返回的是元素本身、元素为 null 时是假值：写成 if (invalid) 会让 [null] 落盘，
+  // 之后前端渲染单词本读到 entry.word 会直接抛错。所以要判 !== undefined。
+  const nullEntry = await request(app).put('/api/wordbook').send({ entries: [null] });
+  assert.equal(nullEntry.status, 400);
+  assert.match(nullEntry.body.error, /word/);
+  assert.deepEqual((await request(app).get('/api/wordbook')).body.entries, [{ word: 'hello', meaning: '你好' }]);
 });
 
 test('迁移接口合并本机数据', async () => {
@@ -141,4 +148,9 @@ test('迁移接口合并本机数据', async () => {
   const blankWord = await request(app).post('/api/library/import').send({ wordbook: [{ word: '   ' }] });
   assert.equal(blankWord.status, 400);
   assert.match(blankWord.body.error, /word/);
+
+  // null 条目同样要拦（见 PUT /api/wordbook 里的说明）。
+  const nullWord = await request(app).post('/api/library/import').send({ wordbook: [null] });
+  assert.equal(nullWord.status, 400);
+  assert.match(nullWord.body.error, /word/);
 });

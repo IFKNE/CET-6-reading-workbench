@@ -139,7 +139,9 @@ export function createApp({ translator, store = createStore() }) {
     const { entries } = req.body ?? {};
     if (!Array.isArray(entries)) return res.status(400).json({ error: 'entries 必须是数组。' });
     const invalid = entries.find((entry) => typeof entry?.word !== 'string' || entry.word.trim().length === 0);
-    if (invalid) return res.status(400).json({ error: '每个单词条目的 word 必须是非空文本。' });
+    // 必须判 `!== undefined`：find() 返回的是「匹配到的那个元素」，元素本身是 null 时是假值，
+    // 写成 `if (invalid)` 会让 [null] 通过校验并落盘，前端渲染单词本时 entry.word 直接抛错。
+    if (invalid !== undefined) return res.status(400).json({ error: '每个单词条目的 word 必须是非空文本。' });
     try {
       return res.json({ ok: true, saved: await store.putWordbook(entries) });
     } catch (error) {
@@ -152,9 +154,9 @@ export function createApp({ translator, store = createStore() }) {
     for (const [name, value] of [['articles', articles], ['folders', folders], ['wordbook', wordbook]]) {
       if (!Array.isArray(value)) return res.status(400).json({ error: `${name} 必须是数组。` });
     }
-    // 与 PUT /api/wordbook 同一条规则：空白词形不许进库。
+    // 与 PUT /api/wordbook 同一条规则：空白词形不许进库。同样要判 `!== undefined`（见上）。
     const blankWord = wordbook.find((entry) => typeof entry?.word !== 'string' || entry.word.trim().length === 0);
-    if (blankWord) return res.status(400).json({ error: '每个单词条目的 word 必须是非空文本。' });
+    if (blankWord !== undefined) return res.status(400).json({ error: '每个单词条目的 word 必须是非空文本。' });
     try {
       return res.json({ imported: await store.importAll({ articles, folders, wordbook }) });
     } catch (error) {
