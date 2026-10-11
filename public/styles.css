@@ -133,6 +133,8 @@ html[data-theme="dark"] .reader-paper .paragraph-translate { color: #216d5d; }
 .word-token:hover, .word-token:focus-visible { color: var(--green-dark); background: linear-gradient(transparent 56%, rgba(236,214,110,.86) 56%); outline: none; }
 .word-token.is-highlighted { background: linear-gradient(transparent 54%, rgba(236,214,110,.92) 54%); }
 .annotation-panel { position: sticky; top: 24px; min-height: 310px; padding: 28px 25px; border-top: 5px solid var(--green); background: #ecdfc5; box-shadow: 7px 7px 0 rgba(75, 83, 65, .12); }
+/* 卡片把手行（把手本身由 .annotation-panel::before 画）：只在手机端的底部卡片里出现。 */
+.sheet-chrome { display: none; }
 .annotation-empty { margin-top: 45px; color: var(--ink-soft); text-align: center; line-height: 1.6; }
 .annotation-empty small { display: block; font-size: 12px; }
 .annotation-mark { display: block; margin-bottom: 15px; color: var(--green); font-size: 30px; }
@@ -291,7 +293,37 @@ html[data-theme="dark"] .drawer-backdrop { background: rgba(0,0,0,.56); }
   .header-meta { display: none; }
   .site-header { justify-content: space-between; }
   .reading-layout { grid-template-columns: 1fr; }
-  .annotation-panel { position: relative; top: auto; }
+  /* 手机端点词：释义不再渲染到整篇文章之后，改成从底部滑出的卡片，
+     反馈落在视线范围内（原来是点了词屏幕毫无变化）。 */
+  .annotation-panel {
+    position: fixed;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 26;
+    min-height: 0;
+    max-height: 62vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    transform: translateY(105%);
+    visibility: hidden;
+    transition: transform .28s ease;
+  }
+  .annotation-panel.is-open { transform: translateY(0); visibility: visible; }
+  /* 打开时画一条把手；收起时不占位置。 */
+  .annotation-panel.is-open::before { content: ''; display: block; width: 36px; height: 4px; margin: 0 auto 8px; border-radius: 999px; background: rgba(34, 49, 43, .32); }
+  .sheet-chrome { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-bottom: 6px; padding: 4px 0; background: inherit; }
+  /* 面板在两种主题下都是浅色卡片，所以按钮固定用深绿＋浅底，暗色下也读得清。 */
+  .sheet-close { flex: none; min-width: 44px; min-height: 44px; border: 1px solid rgba(34, 49, 43, .24); border-radius: 999px; padding: 8px 14px; color: #075e50; background: rgba(255, 253, 247, .55); font: 700 12px var(--sans); letter-spacing: .08em; }
+  .sheet-status { flex: 1; min-width: 0; margin: 0; color: #4b5a52; font: 12px/1.45 var(--sans); }
+  /* 词元触控热区：行高 1.95 纵向有富余，左右用负外边距抵消，不影响排版。 */
+  .word-token { padding: 3px 1px; margin: 0 -1px; touch-action: manipulation; }
+  @media (prefers-reduced-motion: reduce) {
+    .annotation-panel { transition: none; }
+  }
   .reader-paper { min-height: auto; }
   .book-shell { box-shadow: 9px 11px 0 rgba(48, 69, 58, .1); }
   .wordbook-filters { grid-template-columns: 1fr; }

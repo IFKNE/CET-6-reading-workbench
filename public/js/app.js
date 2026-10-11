@@ -203,8 +203,14 @@ function normalizeWord(word) {
   return wordKey(word);
 }
 
+// 手机端底部卡片里的状态镜像：模块级只建这一次，
+// 每次渲染都把它「搬」进卡片头部（同一个节点搬家不会丢文案），
+// 这样 ≤560px 下被隐藏的 #reader-status 里的反馈（已加入单词本／翻译失败等）也能看见。
+const sheetStatus = createElement('p', 'sheet-status', '');
+
 function setReaderStatus(message) {
   elements.readerStatus.textContent = message;
+  sheetStatus.textContent = message;
 }
 
 function applyTheme(theme) {
@@ -247,6 +253,8 @@ function switchView(view) {
   elements.libraryView.hidden = view !== 'library';
   elements.wordbookView.hidden = view !== 'wordbook';
   elements.wordDetailView.hidden = view !== 'word-detail';
+  // 底部卡片只属于阅读页：切走时收起，免得它悬在单词本等页面上。
+  if (view !== 'reader') closeAnnotationSheet();
   // 顶部导航高亮跟随来源分区：从原文进详情页时不高亮“单词本”。
   const highlightView = view === 'word-detail' ? (state.detailOrigin === 'wordbook' ? 'wordbook' : '') : view;
   document.querySelectorAll('[data-view]').forEach((button) => button.classList.toggle('is-active', button.dataset.view === highlightView));
@@ -263,7 +271,30 @@ function switchView(view) {
 
 function setAnnotationContent(content, annotation = null) {
   state.annotation = annotation;
-  elements.annotationPanel.replaceChildren(...content);
+  // 卡片头部（把手由 CSS 的 ::before 画）始终放在内容最前面。
+  elements.annotationPanel.replaceChildren(createSheetChrome(), ...content);
+  // 手机端必须「写内容就滑出卡片」：showLoading()/showError() 不带 annotation，
+  // 若用「有释义才打开」作条件，点词后到译文返回前卡片不会出现——那正是要修的「点了没反应」。
+  // 桌面端只是多一个类，没有任何视觉变化。
+  openAnnotationSheet();
+}
+
+// 卡片头部：桌面端 .sheet-chrome 是 display: none，只在手机端显示成粘性的一行。
+function createSheetChrome() {
+  const chrome = createElement('div', 'sheet-chrome');
+  const close = createElement('button', 'sheet-close', '收起');
+  close.type = 'button';
+  close.addEventListener('click', () => closeAnnotationSheet());
+  chrome.append(sheetStatus, close);
+  return chrome;
+}
+
+function openAnnotationSheet() {
+  elements.annotationPanel.classList.add('is-open');
+}
+
+function closeAnnotationSheet() {
+  elements.annotationPanel.classList.remove('is-open');
 }
 
 function resetAnnotation() {
@@ -274,6 +305,8 @@ function resetAnnotation() {
       createElement('small', '', '释义、翻译与学习笔记会显示在这里。')
     ])
   ]);
+  // 这里是唯一「没有内容」的写入点：内容为空就把卡片收起来，别让它空着挡住正文。
+  closeAnnotationSheet();
 }
 
 function createElement(tag, className, content) {
@@ -1465,11 +1498,26 @@ document.addEventListener('click', (event) => {
   if (!elements.contextMenu.hidden && !elements.contextMenu.contains(event.target)) closeContextMenu();
 });
 
+// 手机端底部卡片：点正文空白处收起。
+// 用 composedPath() 而不是 contains()（同来源面板的写法）：词元点击本身会打开卡片，
+// 同一次点击冒泡到这里必须跳过，否则刚滑出来就被这一次点击关掉。
+document.addEventListener('click', (event) => {
+  if (elements.readerView.hidden) return;
+  if (!elements.annotationPanel.classList.contains('is-open')) return;
+  const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
+  if (path.includes(elements.annotationPanel)) return;
+  if (path.some((node) => node.classList?.contains('word-token'))) return;
+  // 按钮（段落译文、重点词卡片、全文译文…）自己会往卡片里写内容并打开它，不算「点空白处」。
+  if (typeof event.target.closest === 'function' && event.target.closest('button, a')) return;
+  closeAnnotationSheet();
+});
+
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     closeContextMenu();
     closeQuestionModal();
     closeSourcePanel();
+    closeAnnotationSheet();
   }
 });
 
