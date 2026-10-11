@@ -307,6 +307,8 @@ html[data-theme="dark"] .drawer-backdrop { background: rgba(0,0,0,.56); }
     overflow-y: auto;
     overscroll-behavior: contain;
     border-radius: 16px 16px 0 0;
+    /* 顶部收紧：手机上一行的把手＋气泡就够，别让卡片自己占掉半屏。 */
+    padding-top: 18px;
     padding-bottom: calc(20px + env(safe-area-inset-bottom));
     transform: translateY(105%);
     visibility: hidden;
@@ -317,11 +319,17 @@ html[data-theme="dark"] .drawer-backdrop { background: rgba(0,0,0,.56); }
   }
   .annotation-panel.is-open { transform: translateY(0); visibility: visible; transition: transform .28s ease, visibility 0s; }
   /* 打开时画一条把手；收起时不占位置。 */
-  .annotation-panel.is-open::before { content: ''; display: block; width: 36px; height: 4px; margin: 0 auto 8px; border-radius: 999px; background: rgba(34, 49, 43, .32); }
-  .sheet-chrome { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-bottom: 6px; padding: 4px 0; background: inherit; }
-  /* 面板在两种主题下都是浅色卡片，所以按钮固定用深绿＋浅底，暗色下也读得清。 */
-  .sheet-close { flex: none; min-width: 44px; min-height: 44px; border: 1px solid rgba(34, 49, 43, .24); border-radius: 999px; padding: 8px 14px; color: #075e50; background: rgba(255, 253, 247, .55); font: 700 12px var(--sans); letter-spacing: .08em; }
-  .sheet-status { flex: 1; min-width: 0; margin: 0; color: #4b5a52; font: 12px/1.45 var(--sans); }
+  .annotation-panel.is-open::before { content: ''; display: block; width: 36px; height: 4px; margin: 0 auto 4px; border-radius: 999px; background: rgba(34, 49, 43, .32); }
+  /* 卡片顶部只留一小行：把手居中、收起气泡在右上，状态文字在下面一行。
+     整行**不吸顶**：吸顶会在卡片内滚动时一直浮在最上层压住正文（用户实测反馈）。 */
+  .sheet-chrome { position: relative; margin: 0 0 2px; padding: 0; }
+  /* 气泡落在把手那一行里（卡片顶部内衬 + 把手共 26px），所以不额外占高度；
+     与状态文字不同行，也就不需要在文字上留出避让的空档。 */
+  .sheet-close { position: absolute; top: -25px; right: 0; border: 1px solid rgba(34, 49, 43, .2); border-radius: 999px; padding: 5px 12px; color: #075e50; background: rgba(255, 253, 247, .8); font: 700 11px/1.4 var(--sans); letter-spacing: .06em; }
+  /* 最多两行，超过省略：最长的一句是「单词本没能从电脑服务器读到…」，截掉会看不清原因。 */
+  .sheet-status { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 0; color: #4b5a52; font: 12px/1.5 var(--sans); }
+  /* 没有反馈时整行不占高度，卡片顶部只有把手＋气泡。 */
+  .sheet-status:empty { display: none; }
   /* 词元触控热区：行高 1.95 纵向有富余，左右用负外边距抵消，不影响排版。 */
   .word-token { padding: 3px 1px; margin: 0 -1px; touch-action: manipulation; }
   @media (prefers-reduced-motion: reduce) {

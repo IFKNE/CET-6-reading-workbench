@@ -60,7 +60,15 @@ function createSheetChrome() {
 }
 ```
 
-桌面端 `.sheet-chrome { display: none }`；窄屏显示为卡片顶部的粘性一行（`position: sticky; top: 0`），按钮保持至少 44×44 的触控面积。
+桌面端 `.sheet-chrome { display: none }`。
+
+**真机反馈后的修订（2026-10-11）：**初版把这一行做成 `position: sticky; top: 0` 的整条矩形，并给「收起」44×44 的按钮——用户在手机上实测：卡片内滚动时这条矩形**一直浮在最上层压住正文**，而且占地方。现在改成：
+
+- `.sheet-chrome` **不吸顶**（`position: relative`），随内容滚走，任何情况下都不覆盖正文；
+- 「收起」是右上角的小气泡（`padding: 5px 12px`、`font-size: 11px`、圆角 999px），用 `position: absolute; top: -25px` 落在**把手那一行**里，因此不额外占高度；
+- 状态文字是单独的一行（最多两行，`-webkit-line-clamp: 2`，避免截掉「单词本没能从电脑服务器读到…」这种关键原因），没有反馈时 `:empty { display: none }` 整行不占高度；
+- 卡片顶部内衬从 28px 收到 18px，顶部总占用≈ 把手 4px + 一行状态文字，比初版矮了约 30px。
+- 收起后不再有固定在屏幕上的关闭控件：关闭靠点正文空白处或滚回卡片顶部点气泡（点空白本来就已实现）。
 
 ### 4. 反馈也显示在卡片里
 
