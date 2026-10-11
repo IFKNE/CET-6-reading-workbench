@@ -1471,6 +1471,109 @@ git commit -m "fix(web): 客户端加请求超时与非 JSON 响应提示，补�
 
 ---
 
+## Task 8b: 客户端再收口（Task 7b/8 复核结论）
+
+> 依赖 Task 8 产出的 `legacy-library.js`；本节排在文档里靠前是为了紧挨 Task 7b，**执行顺序在 Task 8 之后**。
+
+**Files:** modify `public/js/library-api.js`、`public/js/article-library.js`、`public/js/legacy-library.js`、`test/library-api-client.test.js`
+
+- [ ] **Step 1: 让超时覆盖到读完响应体，并隔离订阅者抛错**
+
+复核实测：`clearTimeout` 在拿到响应头后就执行了，认证门户只要「先回响应头、再把响应体挂住」就能让请求永远悬着；另外单个订阅者抛错会越过 `forEach`，把请求本该抛出的错误顶掉、并让之后注册的订阅者收不到状态变化。
+
+```js
+function setOnline(next) {
+  if (next === online) return;
+  online = next;
+  listeners.forEach((handler) => {
+    // 单个订阅者抛错既不能影响其他订阅者，也不能把请求自己的错误顶掉。
+    try {
+      handler(online);
+    } catch (error) {
+      listeners.delete(handler);
+      console.error('服务器状态订阅回调抛错，已移除该订阅者。', error);
+    }
+  });
+}
+
+async function requestJson(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response;
+  let body;
+  let parsed = true;
+  try {
+    response = await fetch(url, { ...options, signal: controller.signal });
+    // 计时器要一直活到读完响应体：认证门户可能先回响应头、再把响应体挂住。
+    body = await response.json().catch(() => { parsed = false; return null; });
+  } catch {
+    // 网络不可达、连接被中止（超时）都算「没连上电脑服务器」。
+    setOnline(false);
+    throw new Error('未连接到电脑服务器，数据未同步。');
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    // 能拿到响应就说明服务器在线，只是这次请求失败了。
+    setOnline(true);
+    throw new Error(body?.error || '服务器请求失败，请稍后重试。');
+  }
+  setOnline(true);
+  if (!parsed) {
+    // 200 却不是 JSON：公共 Wi-Fi 的认证门户就长这样，必须给出能看懂的中文提示。
+    throw new Error('服务器返回了无法解析的数据，请确认访问的是电脑上的服务器地址。');
+  }
+  return body;
+}
+```
+
+- [ ] **Step 2: 顺手收掉两处小隐患**
+
+`public/js/article-library.js` 的三处解构补默认值，避免响应缺字段时抛 `is not iterable`：
+
+```js
+  const { articles = [], folders = [] } = await fetchLibrary();
+```
+
+`public/js/legacy-library.js` 顶部加一段说明——它与适配层有 5 个同名导出，而仓库没有 lint，误导入不会报错：
+
+```js
+// 仅供一次性迁移使用：只从这里导入 listLegacyArticles / listLegacyFolders / readLegacyWordbook。
+// 下面的 getArticle / saveArticle / deleteArticle / createFolder / deleteFolder 是旧的 IndexedDB 实现，
+// 与 article-library.js 同名但来源不同，别再使用。
+```
+
+- [ ] **Step 3: 补订阅隔离的测试**
+
+```js
+test('单个订阅者抛错不影响其他订阅者，也不会顶掉请求错误', async () => {
+  const seen = [];
+  let firstCall = true;
+  // 初次调用不抛（否则会在订阅时就被移除），之后的每次通知都抛。
+  const bad = () => { if (!firstCall) throw new Error('订阅者自己炸了'); firstCall = false; };
+  const unsubscribeBad = subscribeServerStatus(bad);
+  const unsubscribeGood = subscribeServerStatus((online) => seen.push(online));
+  await withStubFetch(() => { throw new TypeError('Failed to fetch'); }, async () => {
+    await assert.rejects(() => fetchLibrary(), { message: /未连接到电脑服务器/ });
+  });
+  unsubscribeBad();
+  unsubscribeGood();
+  assert.deepEqual(seen, [true, false]);
+});
+```
+
+- [ ] **Step 4: 运行测试 + 提交**
+
+Run: `node --test --test-isolation=none test/library-api-client.test.js`
+Expected: PASS（9 个 test 全绿）
+
+```bash
+git add public/js/library-api.js public/js/article-library.js public/js/legacy-library.js test/library-api-client.test.js
+git commit -m "fix(web): 超时覆盖响应体读取，隔离订阅者抛错并补 legacy 说明"
+```
+
+---
+
 ## Task 8: 文章库适配层改为服务端，旧 IndexedDB 实现留存为 legacy
 
 **Files:**
@@ -1837,6 +1940,26 @@ html[data-theme="dark"] .library-sync { background: rgba(255, 255, 255, .04); }
 ```js
     // 服务器库还是空的，说明本机浏览器里可能有一批待迁移的老数据，把上传按钮点亮。
     elements.uploadLocalData.classList.toggle('is-highlighted', articles.length === 0);
+```
+
+**同时补上三处「网络失败没人接」的入口**（Task 8 复核结论：适配层改成走网络之后，这些入口在离线时会变成未处理拒绝、界面毫无反馈）：
+
+- `openSavedArticle(record.id)` 的按钮回调（`app.js` 中 `open.type = 'button'; open.addEventListener('click', ...)` 那处）改成：
+
+```js
+      open.type = 'button';
+      // 适配层现在走网络：离线时 getArticle/listFolders 会 reject，必须接住并提示。
+      open.addEventListener('click', () => { openSavedArticle(record.id).catch((error) => setReaderStatus(error.message)); });
+```
+
+- 新建文件夹的两个入口（`elements.createFolder.addEventListener('click', createFolderFromInput)` 与输入框回车那处）改成：
+
+```js
+elements.createFolder.addEventListener('click', () => { createFolderFromInput().catch((error) => setFolderMessage(error.message)); });
+```
+
+```js
+  if (event.key === 'Enter') { event.preventDefault(); createFolderFromInput().catch((error) => setFolderMessage(error.message)); }
 ```
 
 在 `createFolderFromInput()` 函数之前插入迁移处理与状态订阅：
