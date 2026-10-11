@@ -959,7 +959,7 @@ Expected: FAIL — 新增的 2 个 test 返回 404
     try {
       return res.json({ entries: await store.getWordbook() });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '单词本读取失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '单词本读取失败。' });
     }
   });
 
@@ -995,8 +995,8 @@ Expected: FAIL — 新增的 2 个 test 返回 404
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `node --test test/library-api.test.js`
-Expected: PASS（6 个 test 全绿）
+Run: `node --test --test-isolation=none test/library-api.test.js`
+Expected: PASS（8 个 test 全绿：Task 4 的 6 个 + 本次 2 个）
 
 - [ ] **Step 5: 提交**
 
