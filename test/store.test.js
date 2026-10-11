@@ -197,7 +197,9 @@ test('迁移时单词本保留服务器已有条目，只补新词', async () =>
 
 test('putWordbook 拒绝非数组，不会写出自己读不回来的文档', async () => {
   const { dataDir, store } = await createTemporaryStore();
-  await assert.rejects(() => store.putWordbook('hello'), { message: /entries 必须是数组/ });
+  // statusCode 挂在错误上：路由层按它回 400，而不是靠 instanceof TypeError 猜
+  // （fetch 的网络故障也是 TypeError，靠类型猜会把上游故障误报成 400）。
+  await assert.rejects(() => store.putWordbook('hello'), (error) => error.statusCode === 400 && /entries 必须是数组/.test(error.message));
   // 关键：拒绝之后文件仍然可读——否则整库会因为一次坏调用变成打不开的状态。
   assert.deepEqual(await createStore({ dataDir }).getWordbook(), []);
 });

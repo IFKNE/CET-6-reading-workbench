@@ -27,6 +27,13 @@ function normalizeDocument(parsed, filePath) {
   return { ...emptyDocument(), articles: parsed.articles ?? [], folders: parsed.folders ?? [], wordbook: parsed.wordbook ?? [] };
 }
 
+// 参数不合法是调用方的问题，不是服务故障：把 400 挂在错误上，让路由层按 statusCode 取值。
+function invalidArgument(message) {
+  const error = new TypeError(message);
+  error.statusCode = 400;
+  return error;
+}
+
 export function createStore({ dataDir = process.env.DATA_DIR || './data', now = () => new Date().toISOString() } = {}) {
   const filePath = path.join(dataDir, 'library.json');
   let document = null;
@@ -128,7 +135,7 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
       // 非数组必须在落盘前拒绝：一旦写成 {"wordbook": "hello"}，normalizeDocument 之后
       // 每一次读取都会判定文档损坏，整库要手工修文件才能再打开。
       // 返回 rejected Promise（而非同步 throw），与其它成员的 await 调用方式保持一致。
-      if (!Array.isArray(entries)) return Promise.reject(new TypeError('entries 必须是数组。'));
+      if (!Array.isArray(entries)) return Promise.reject(invalidArgument('entries 必须是数组。'));
       return mutate((current) => {
         current.wordbook = structuredClone(entries);
         return current.wordbook.length;
@@ -137,7 +144,7 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
     importAll({ articles = [], folders = [], wordbook = [] } = {}) {
       // 与 putWordbook 同一条理由：参数不是数组就拒绝，别把字符串当数组遍历后写进库。
       for (const [name, value] of [['articles', articles], ['folders', folders], ['wordbook', wordbook]]) {
-        if (!Array.isArray(value)) return Promise.reject(new TypeError(`${name} 必须是数组。`));
+        if (!Array.isArray(value)) return Promise.reject(invalidArgument(`${name} 必须是数组。`));
       }
       return mutate((current) => {
         let importedArticles = 0;

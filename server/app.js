@@ -6,12 +6,11 @@ import { createStore } from './store.js';
 const validScopes = new Set(['word', 'word-batch', 'phrase', 'sentence', 'paragraph', 'question', 'prestudy']);
 const MAX_ARTICLE_LENGTH = 100000;
 
-// 全文件唯一的「异常 → 状态码」规则，别让每个 handler 各写一套：
-// 带 statusCode 的（翻译上游错误）用自己的；存储层参数类型错误算 400；其余算服务端故障。
+// 全文件唯一的「异常 → 状态码」规则：错误自带 statusCode 就用它（存储层的参数守卫挂 400、
+// 翻译上游错误带自己的码、缺 Key 挂 503），否则回落到调用方给的兜底值。
+// 不按 instanceof TypeError 猜——fetch 的网络故障也是 TypeError，猜错会把上游故障报成 400。
 function statusForError(error, fallback) {
-  if (error.statusCode) return error.statusCode;
-  if (error instanceof TypeError) return 400;
-  return fallback;
+  return error.statusCode ?? fallback;
 }
 
 // 名字里写明 OrRespond：它失败时自己就把 400 写进响应了，

@@ -80,11 +80,19 @@ test('路径 id 为空白时返回 400，且不改动数据', async () => {
   assert.deepEqual((await request(app).get('/api/library')).body.articles, []);
 });
 
-test('存储层出错时返回 500 并带上原因', async () => {
-  // 注入一个必然失败的 store：验证「校验通过之后才写、写失败要转成 500 文案」这条链路。
+test('存储层出错时按错误自带的状态码返回', async () => {
+  // 没带 statusCode 的按兜底值 500 返回，并带上原因。
   const failing = { listArticles: async () => { throw new Error('磁盘写入失败。'); }, listFolders: async () => [] };
-  const app = createApp({ translator, store: failing });
-  const response = await request(app).get('/api/library');
-  assert.equal(response.status, 500);
-  assert.equal(response.body.error, '磁盘写入失败。');
+  const failed = await request(createApp({ translator, store: failing })).get('/api/library');
+  assert.equal(failed.status, 500);
+  assert.equal(failed.body.error, '磁盘写入失败。');
+
+  // 自带 statusCode 的（存储层参数守卫挂的 400）按它返回。
+  const rejecting = {
+    listArticles: async () => { const error = new Error('参数不合法。'); error.statusCode = 400; throw error; },
+    listFolders: async () => []
+  };
+  const rejected = await request(createApp({ translator, store: rejecting })).get('/api/library');
+  assert.equal(rejected.status, 400);
+  assert.equal(rejected.body.error, '参数不合法。');
 });
