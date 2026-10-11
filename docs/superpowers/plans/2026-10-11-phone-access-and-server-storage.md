@@ -475,6 +475,24 @@ test('deleteFolder 收到空 id 时不动「未归档」的文章', async () => 
   assert.deepEqual(await store.deleteFolder(''), { detached: 0 });
   assert.equal((await store.getArticle('a1')).updatedAt, '2026-10-11T00:00:00.000Z');
 });
+
+test('importAll 参数不是数组时拒绝，不会写出坏文档', async () => {
+  const { dataDir, store } = await createTemporaryStore();
+  // 不加守卫时会返回 { folders: 2 } 并把裸字符串写进 folders（'ab' 被当作可遍历对象）。
+  await assert.rejects(() => store.importAll({ folders: 'ab' }), { message: /folders 必须是数组/ });
+  await assert.rejects(() => store.importAll({ articles: 'x' }), { message: /articles 必须是数组/ });
+  assert.deepEqual(await createStore({ dataDir }).listFolders(), []);
+});
+
+test('迁移时 updatedAt 相同则保留服务器版本', async () => {
+  // Task 5 的「重复迁移返回 0」依赖这条平局规则，先在存储层钉住它。
+  const { store } = await createTemporaryStore();
+  const stamp = '2026-10-11T00:00:00.000Z';
+  await store.putArticle({ id: 'a1', article: 'Server copy.', updatedAt: stamp });
+  const result = await store.importAll({ articles: [{ id: 'a1', article: 'Local copy.', updatedAt: stamp }] });
+  assert.equal(result.articles, 0);
+  assert.equal((await store.getArticle('a1')).article, 'Server copy.');
+});
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -527,8 +545,13 @@ Expected: FAIL — `store.importAll is not a function`
 
 ```js
     importAll({ articles = [], folders = [], wordbook = [] } = {}) {
+      // 与 putWordbook 同一条理由：参数不是数组就拒绝，别把字符串当数组遍历后写进库。
+      for (const [name, value] of [['articles', articles], ['folders', folders], ['wordbook', wordbook]]) {
+        if (!Array.isArray(value)) return Promise.reject(new TypeError(`${name} 必须是数组。`));
+      }
       return mutate((current) => {
         let importedArticles = 0;
+        let importedFolders = 0;
         let importedWordbook = 0;
 
         for (const folder of folders) {
@@ -536,6 +559,9 @@ Expected: FAIL — `store.importAll is not a function`
           const index = current.folders.findIndex((item) => item.id === folder.id);
           if (index === -1) current.folders.push(record);
           else current.folders[index] = record;
+          // 三个计数都是「真正落库的条数」，而不是入参长度：
+          // 否则重复点迁移按钮会永远返回非 0，调用方无法判断这次到底有没有改动。
+          importedFolders += 1;
         }
 
         for (const article of articles) {
@@ -564,7 +590,7 @@ Expected: FAIL — `store.importAll is not a function`
           importedWordbook += 1;
         }
 
-        return { articles: importedArticles, folders: folders.length, wordbook: importedWordbook };
+        return { articles: importedArticles, folders: importedFolders, wordbook: importedWordbook };
       });
     }
 ```
@@ -572,7 +598,7 @@ Expected: FAIL — `store.importAll is not a function`
 - [ ] **Step 5: 运行测试确认通过**
 
 Run: `node --test --test-isolation=none test/store.test.js`
-Expected: PASS（17 个 test 全绿：13 既有 + 4 新增）
+Expected: PASS（19 个 test 全绿：13 既有 + 6 新增）
 
 - [ ] **Step 6: 提交**
 
@@ -1550,6 +1576,13 @@ async function uploadLocalData() {
   try {
     const [articles, folders] = await Promise.all([listLegacyArticles(), listLegacyFolders()]);
     const wordbook = readLegacyWordbook();
+    // 迁移是「只增不减」的合并：服务器上没有墓碑记录，所以服务器上删过的文章
+    // 会被本机旧数据重新带回来。这不是 bug，但必须让用户在重复点击前知道。
+    const existing = await listArticles();
+    if (existing.length && !window.confirm(`服务器上已有 ${existing.length} 篇文章。继续会把本机数据合并进去：不会删除服务器上的内容，但你在服务器上删除过的文章可能被本机旧数据补回来。继续？`)) {
+      setSyncMessage('已取消，未上传任何数据。');
+      return;
+    }
     const { imported } = await importLocalData({ articles, folders, wordbook });
     setSyncMessage(`已上传 ${imported.articles} 篇、${imported.wordbook} 个词。本机数据仍保留在原浏览器里，可随时回退。`, true);
     await loadWordbook();
