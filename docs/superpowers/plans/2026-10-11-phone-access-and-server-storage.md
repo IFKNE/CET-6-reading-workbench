@@ -493,6 +493,16 @@ test('迁移时 updatedAt 相同则保留服务器版本', async () => {
   assert.equal(result.articles, 0);
   assert.equal((await store.getArticle('a1')).article, 'Server copy.');
 });
+
+test('重复迁移同一份文件夹数据时不计入改动', async () => {
+  const { store } = await createTemporaryStore();
+  const folders = [{ id: 'f1', name: '真题听力', createdAt: '2026-10-11T00:00:00.000Z' }];
+  assert.equal((await store.importAll({ folders })).folders, 1);
+  // 内容没变就不该再报 1，否则调用方永远判断不出「这次没有改动」。
+  assert.equal((await store.importAll({ folders })).folders, 0);
+  // 名字变了才算一次改动。
+  assert.equal((await store.importAll({ folders: [{ ...folders[0], name: '新名字' }] })).folders, 1);
+});
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -557,11 +567,17 @@ Expected: FAIL — `store.importAll is not a function`
         for (const folder of folders) {
           const record = structuredClone(folder);
           const index = current.folders.findIndex((item) => item.id === folder.id);
-          if (index === -1) current.folders.push(record);
-          else current.folders[index] = record;
-          // 三个计数都是「真正落库的条数」，而不是入参长度：
-          // 否则重复点迁移按钮会永远返回非 0，调用方无法判断这次到底有没有改动。
-          importedFolders += 1;
+          if (index === -1) {
+            current.folders.push(record);
+            importedFolders += 1;
+            continue;
+          }
+          // 内容没变就不写：文件夹没有 updatedAt，无条件 upsert 会让重复迁移永远报非 0，
+          // 调用方就判断不出「这次到底有没有改动」。文章/单词本的计数都是这个含义，三个字段保持一致。
+          if (JSON.stringify(current.folders[index]) !== JSON.stringify(record)) {
+            current.folders[index] = record;
+            importedFolders += 1;
+          }
         }
 
         for (const article of articles) {
@@ -598,7 +614,7 @@ Expected: FAIL — `store.importAll is not a function`
 - [ ] **Step 5: 运行测试确认通过**
 
 Run: `node --test --test-isolation=none test/store.test.js`
-Expected: PASS（19 个 test 全绿：13 既有 + 6 新增）
+Expected: PASS（20 个 test 全绿：13 既有 + 7 新增）
 
 - [ ] **Step 6: 提交**
 
