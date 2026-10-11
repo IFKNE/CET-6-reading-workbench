@@ -15,6 +15,7 @@
 - 本机**不是**管理员，装 Tailscale 那一步必须由用户手工完成。
 - 本机 Python 3.13.9 存在但**没有安装 playwright**（`ModuleNotFoundError: No module named 'playwright'`），因此 `test/e2e.py` 当前跑不起来，本计划的验收以 Task 13 的 REST 实测为准，不依赖 playwright。
 - 仓库根目录**没有** `.env.example`（README 里提到它，属于历史遗留），Task 6 会补上。
+- **测试命令约定：** 计划里写的 `node --test <file>` 在你自己的电脑上直接可用；在受限沙箱里跑要给测试运行器加 `--test-isolation=none`（`npm test` 会为每个测试文件开管道子进程，被沙箱拒绝为 `spawn EPERM`，**既有 13 个测试文件同样失败**，不是代码问题）。
 
 ---
 
@@ -59,9 +60,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { createStore } from '../server/store.js';
 
-async function createTemporaryStore() {
+async function createTemporaryStore(options = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cet6-store-'));
-  return { dataDir, store: createStore({ dataDir }) };
+  return { dataDir, store: createStore({ dataDir, ...options }) };
 }
 
 test('空目录时文章、文件夹、单词本都是空数组', async () => {
@@ -86,6 +87,50 @@ test('写入文章后可以按 id 读回，且内容与写入一致', async () =
   await store.deleteArticle('a1');
   assert.deepEqual(await store.listArticles(), []);
 });
+
+test('写入会落盘：换一个新实例仍能读回同一份数据', async () => {
+  // 只有这条能证明数据真的在磁盘上——同实例读回可能只是读了内存缓存。
+  const { dataDir, store } = await createTemporaryStore();
+  const article = { id: 'a1', article: 'Hello world.', updatedAt: '2026-10-11T00:00:00.000Z' };
+  await store.putArticle(article);
+  const reopened = createStore({ dataDir });
+  assert.deepEqual(await reopened.listArticles(), [article]);
+});
+
+test('只读不写时不会创建文件', async () => {
+  const { dataDir, store } = await createTemporaryStore();
+  await store.listArticles();
+  await assert.rejects(() => fs.readFile(path.join(dataDir, 'library.json'), 'utf8'), { code: 'ENOENT' });
+});
+
+test('返回的数组与对象都是副本，改它不会影响存储', async () => {
+  const { store } = await createTemporaryStore();
+  await store.putArticle({ id: 'a1', article: 'One.', updatedAt: '2026-10-11T00:00:00.000Z' });
+  const list = await store.listArticles();
+  list.push({ id: 'ghost' });
+  list[0].article = '被改了';
+  assert.deepEqual((await store.listArticles()).map((item) => item.id), ['a1']);
+  assert.equal((await store.getArticle('a1')).article, 'One.');
+});
+
+test('落盘失败时内存不领先磁盘，后续写入不会把失败的改动带上盘', async () => {
+  const { dataDir, store } = await createTemporaryStore();
+  await store.putArticle({ id: 'a1', article: 'One.', updatedAt: '2026-10-11T00:00:00.000Z' });
+  await store.putArticle({ id: 'a2', article: 'Two.', updatedAt: '2026-10-11T00:00:00.000Z' });
+
+  // 把临时文件路径先占成一个目录：writeFile 必然失败，等价于“磁盘写不进去”。
+  const blocked = path.join(dataDir, 'library.json.tmp');
+  await fs.mkdir(blocked);
+  await assert.rejects(() => store.deleteArticle('a1'));
+  await fs.rm(blocked, { recursive: true, force: true });
+
+  // 失败的删除没有生效……
+  assert.deepEqual((await store.listArticles()).map((item) => item.id), ['a1', 'a2']);
+  // ……而且后续成功写入也不会顺手把它落盘。
+  await store.putArticle({ id: 'a3', article: 'Three.', updatedAt: '2026-10-11T00:00:00.000Z' });
+  const onDisk = JSON.parse(await fs.readFile(path.join(dataDir, 'library.json'), 'utf8'));
+  assert.deepEqual(onDisk.articles.map((item) => item.id).sort(), ['a1', 'a2', 'a3']);
+});
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -106,6 +151,27 @@ function emptyDocument() {
   return { version: 1, articles: [], folders: [], wordbook: [] };
 }
 
+// 形状不对时与 JSON 语法错误同等处理：宁可服务报错，也不让一份半截文件变成空库。
+function corrupt(filePath, detail, cause) {
+  const suffix = detail ? `（${detail}）` : '';
+  return new Error(`文章库文件无法解析：${filePath}${suffix}。请先备份该文件，再修复或删除它后重启服务。`, { cause });
+}
+
+function normalizeDocument(parsed, filePath) {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw corrupt(filePath, '根节点必须是对象');
+  }
+  if (parsed.version !== undefined && parsed.version !== 1) {
+    throw corrupt(filePath, `不支持的文档版本 ${String(parsed.version)}`);
+  }
+  for (const field of ['articles', 'folders', 'wordbook']) {
+    if (parsed[field] !== undefined && !Array.isArray(parsed[field])) {
+      throw corrupt(filePath, `${field} 必须是数组`);
+    }
+  }
+  return { ...emptyDocument(), articles: parsed.articles ?? [], folders: parsed.folders ?? [], wordbook: parsed.wordbook ?? [] };
+}
+
 export function createStore({ dataDir = process.env.DATA_DIR || './data', now = () => new Date().toISOString() } = {}) {
   const filePath = path.join(dataDir, 'library.json');
   let document = null;
@@ -114,40 +180,31 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
   async function load() {
     if (document) return document;
     try {
-      const raw = await fs.readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      document = {
-        version: 1,
-        articles: Array.isArray(parsed?.articles) ? parsed.articles : [],
-        folders: Array.isArray(parsed?.folders) ? parsed.folders : [],
-        wordbook: Array.isArray(parsed?.wordbook) ? parsed.wordbook : []
-      };
+      document = normalizeDocument(JSON.parse(await fs.readFile(filePath, 'utf8')), filePath);
     } catch (error) {
-      if (error.code === 'ENOENT') {
-        document = emptyDocument();
-      } else if (error instanceof SyntaxError) {
-        // 数据安全优先：宁可服务报错，也用空文档覆盖用户已有数据这种事绝不发生。
-        throw new Error(`文章库文件无法解析：${filePath}。请先备份该文件，再修复或删除它后重启服务。`);
-      } else {
-        throw error;
-      }
+      if (error.code === 'ENOENT') document = emptyDocument();
+      else if (error instanceof SyntaxError) throw corrupt(filePath, error.message, error);
+      else throw error;
     }
     return document;
   }
 
-  async function persist() {
+  async function persist(target) {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     const temporaryPath = `${filePath}.tmp`;
-    await fs.writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
+    await fs.writeFile(temporaryPath, `${JSON.stringify(target, null, 2)}\n`, 'utf8');
     await fs.rename(temporaryPath, filePath);
   }
 
-  // 所有写操作串行化：前一次失败也不能让后面的写入卡在 rejected 的 Promise 上。
+  // 写操作串行化，并且「先写副本、落盘成功后才推进内存」：
+  // 若先改内存再落盘，一旦落盘失败，内存就领先于磁盘——调用方收到的是失败，
+  // 而后续任何一次成功写入都会把这次被判定失败的改动悄悄带上盘。
   function mutate(action) {
     const next = writeChain.catch(() => {}).then(async () => {
-      const current = await load();
-      const result = action(current);
-      await persist();
+      const draft = structuredClone(await load());
+      const result = action(draft);
+      await persist(draft);
+      document = draft;
       return result;
     });
     writeChain = next;
@@ -194,8 +251,10 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `node --test test/store.test.js`
-Expected: PASS（2 个 test 全绿）
+Run: `node --test test/store.test.js`（沙箱里用 `node --test --test-isolation=none test/store.test.js`，见文首约定）
+Expected: PASS（6 个 test 全绿）
+
+> **修订记录（Task 1 代码质量复核后）：** 初版 `mutate` 是「先改内存、再落盘」，复核用一个必然失败的 `persist`（把 `library.json.tmp` 占成目录）复现出内存领先磁盘、后续写入把已报失败的改动带上盘。现在改成副本写盘（`draft` → `persist(draft)` → `document = draft`），并补了形状/版本校验与 4 个回归测试（磁盘往返、只读不建文件、副本隔离、落盘失败不脱节）。
 
 - [ ] **Step 5: 提交**
 
@@ -237,8 +296,22 @@ test('文件损坏时抛错，且不改写原文件', async () => {
   assert.equal(await fs.readFile(path.join(dataDir, 'library.json'), 'utf8'), broken);
 });
 
+test('文档形状或版本不合法时同样报错，且不改写文件', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cet6-store-shape-'));
+  const original = JSON.stringify({ version: 1, articles: 'oops', folders: [], wordbook: [] });
+  await fs.writeFile(path.join(dataDir, 'library.json'), original, 'utf8');
+  await assert.rejects(() => createStore({ dataDir }).listArticles(), { message: /无法解析/ });
+
+  const versioned = await fs.mkdtemp(path.join(os.tmpdir(), 'cet6-store-version-'));
+  await fs.writeFile(path.join(versioned, 'library.json'), JSON.stringify({ version: 2, articles: [], folders: [], wordbook: [] }), 'utf8');
+  await assert.rejects(() => createStore({ dataDir: versioned }).listArticles(), { message: /不支持的文档版本/ });
+  assert.equal(await fs.readFile(path.join(dataDir, 'library.json'), 'utf8'), original);
+});
+
 test('删除文件夹会把其中文章解绑为未归档并计数', async () => {
-  const { store } = await createTemporaryStore();
+  // 注入固定时钟：断言解绑时确实盖了当前时间，而不是靠“不等于旧值”这种弱断言。
+  const stamp = '2026-10-11T02:00:00.000Z';
+  const { store } = await createTemporaryStore({ now: () => stamp });
   await store.putFolder({ id: 'f1', name: '真题听力', createdAt: '2026-10-11T00:00:00.000Z' });
   await store.putArticle({ id: 'a1', article: 'One.', folderId: 'f1', updatedAt: '2026-10-11T00:00:00.000Z' });
   await store.putArticle({ id: 'a2', article: 'Two.', folderId: 'f1', updatedAt: '2026-10-11T00:00:00.000Z' });
@@ -250,8 +323,9 @@ test('删除文件夹会把其中文章解绑为未归档并计数', async () =>
   assert.deepEqual(await store.listFolders(), []);
   const articles = await store.listArticles();
   assert.deepEqual(articles.map((article) => article.folderId), ['', '', '']);
-  // 解绑会刷新 updatedAt，否则手机/电脑合并时旧数据可能被判为“更新”。
-  assert.notEqual(articles.find((article) => article.id === 'a1').updatedAt, '2026-10-11T00:00:00.000Z');
+  // 解绑会刷新 updatedAt，否则手机/电脑合并时这条改动可能被判为“不更新”。
+  assert.deepEqual(articles.filter((article) => article.id !== 'a3').map((article) => article.updatedAt), [stamp, stamp]);
+  assert.equal(articles.find((article) => article.id === 'a3').updatedAt, '2026-10-11T00:00:00.000Z');
 });
 
 test('单词本是整体替换', async () => {
@@ -315,8 +389,8 @@ Expected: FAIL — `store.putFolder is not a function`（以及单词本相关�
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `node --test test/store.test.js`
-Expected: PASS（7 个 test 全绿）
+Run: `node --test --test-isolation=none test/store.test.js`
+Expected: PASS（12 个 test 全绿）
 
 - [ ] **Step 5: 提交**
 
@@ -429,8 +503,8 @@ Expected: FAIL — `store.importAll is not a function`
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `node --test test/store.test.js`
-Expected: PASS（9 个 test 全绿）
+Run: `node --test --test-isolation=none test/store.test.js`
+Expected: PASS（14 个 test 全绿）
 
 - [ ] **Step 5: 提交**
 
