@@ -8,7 +8,7 @@ function createId(prefix) {
 // 文章按 updatedAt 降序、文件夹按 createdAt 升序、getArticle 未命中 resolve undefined、
 // createFolder 解析出新文件夹 id、saveArticle 解析出落库后的记录。
 export async function listArticles() {
-  const { articles = [], folders = [] } = await fetchLibrary();
+  const { articles = [] } = await fetchLibrary();
   return [...articles].sort((left, right) => String(right.updatedAt ?? '').localeCompare(String(left.updatedAt ?? '')));
 }
 

@@ -21,7 +21,6 @@ const SAVE_WORD_LABEL = '加入单词本  +';
 const SAVE_WORD_AGAIN_LABEL = '本篇再记一次  +';
 const storageKeys = {
   article: 'cet6:article',
-  wordbook: 'cet6:wordbook',
   highlights: 'cet6:highlights',
   prestudyCache: 'cet6:prestudy-cache'
 };
@@ -80,6 +79,8 @@ const elements = {
 const state = {
   article: localStorage.getItem(storageKeys.article) ?? '',
   entries: [],
+  wordbookError: '',
+  wordbookStatus: 'loading',
   highlights: new Set(readHighlights()),
   selection: null,
   contextTarget: null,
@@ -138,24 +139,54 @@ function savePrestudyCache(cache) {
 }
 
 let wordbookWriteChain = Promise.resolve();
+let wordbookLoadPromise = null;
+
+function ensureWordbookLoaded() {
+  if (!wordbookLoadPromise) wordbookLoadPromise = loadWordbook();
+  return wordbookLoadPromise;
+}
+
+function setWordbookError(message) {
+  state.wordbookError = message || '';
+  renderWordbook();
+}
 
 // 写入串行化 + 快照：旧响应晚到也不会用过期数据覆盖新数据。
 function persistWordbook() {
-  const snapshot = JSON.parse(JSON.stringify(state.entries));
   wordbookWriteChain = wordbookWriteChain
     .catch(() => {})
-    .then(() => putWordbook(snapshot))
-    .catch((error) => setReaderStatus(error.message));
+    .then(async () => {
+      // 先等首次拉取落地：否则可能拿着空数组去整表替换服务器上的单词本。
+      await ensureWordbookLoaded();
+      if (state.wordbookStatus !== 'ready') {
+        // 拉取没成功就绝不写：PUT 是整表替换，写下去等于把服务器上的单词本清空。
+        throw new Error('单词本没能从电脑服务器读到，这次改动没有保存。');
+      }
+      // 快照在等待之后取：拉取期间用户新加的词也在里面。
+      await putWordbook(JSON.parse(JSON.stringify(state.entries)));
+      state.wordbookError = '';
+    })
+    .catch((error) => setWordbookError(error.message));
   return wordbookWriteChain;
 }
 
 async function loadWordbook() {
   try {
     const { entries } = await fetchWordbook();
-    state.entries = Array.isArray(entries) ? entries : [];
+    const serverEntries = Array.isArray(entries) ? entries : [];
+    // 拉取期间用户可能已经存了词：按词形合并，服务器条目优先、本机新增的保留。
+    const merged = [...serverEntries];
+    for (const entry of state.entries) {
+      if (!merged.some((item) => wordKey(item?.word) === wordKey(entry?.word))) merged.push(entry);
+    }
+    state.entries = merged;
+    state.wordbookStatus = 'ready';
+    state.wordbookError = '';
   } catch (error) {
+    // 不把 entries 清空成「一本空单词本」的样子：那是骗人的，而且会诱导下一次整表覆盖。
+    state.wordbookStatus = 'failed';
+    state.wordbookError = error.message;
     setReaderStatus(error.message);
-    state.entries = [];
   }
   renderWordbook();
 }
@@ -1059,16 +1090,23 @@ function renderWordbook() {
   elements.wordbookCount.textContent = count;
   elements.drawerCount.textContent = count;
   elements.wordbookList.replaceChildren();
+  // 读/写失败必须显示在单词本自己这里：以前只写进 #reader-status，
+  // 而那个元素在粘贴页是隐藏的，用户只会看到一本「空单词本」。
+  if (state.wordbookError && state.entries.length > 0) {
+    elements.wordbookList.append(createElement('p', 'book-empty wordbook-error', state.wordbookError));
+  }
   const tree = createSourceTree(state.entries, state.libraryIndex.articles, state.libraryIndex.folders);
   const scoped = filterEntriesBySource(state.entries, state.sourceSelection);
   const visibleEntries = filterWords(scoped, { query: elements.wordSearch.value, ...state.wordFilters });
   renderSourceFilter(tree);
   if (visibleEntries.length === 0) {
-    const message = state.entries.length === 0
-      ? '这里还没有单词。阅读时点击任意单词，再选择“加入单词本”。'
-      : state.sourceSelection.all
-        ? '当前搜索或状态筛选下没有单词。'
-        : `“${describeSelection(state.sourceSelection, tree, state.entries, state.libraryIndex.articles).label}”下没有匹配的单词。`;
+    const message = state.wordbookError
+      ? state.wordbookError
+      : state.entries.length === 0
+        ? '这里还没有单词。阅读时点击任意单词，再选择“加入单词本”。'
+        : state.sourceSelection.all
+          ? '当前搜索或状态筛选下没有单词。'
+          : `“${describeSelection(state.sourceSelection, tree, state.entries, state.libraryIndex.articles).label}”下没有匹配的单词。`;
     elements.wordbookList.append(createElement('p', 'book-empty', message));
     return;
   }
@@ -1473,4 +1511,4 @@ elements.drawerBackdrop.remove();
 switchView('paste');
 renderWordbook();
 renderArticleLibrary();
-await loadWordbook();
+await ensureWordbookLoaded();
