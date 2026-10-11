@@ -918,6 +918,13 @@ test('单词本 GET / PUT 往返，并校验条目', async () => {
   const badEntry = await request(app).put('/api/wordbook').send({ entries: [{ meaning: '没有词形' }] });
   assert.equal(badEntry.status, 400);
   assert.match(badEntry.body.error, /word/);
+
+  // find() 返回的是元素本身、元素为 null 时是假值：写成 if (invalid) 会让 [null] 落盘，
+  // 之后前端渲染单词本读到 entry.word 会直接抛错。所以要判 !== undefined。
+  const nullEntry = await request(app).put('/api/wordbook').send({ entries: [null] });
+  assert.equal(nullEntry.status, 400);
+  assert.match(nullEntry.body.error, /word/);
+  assert.deepEqual((await request(app).get('/api/wordbook')).body.entries, [{ word: 'hello', meaning: '你好' }]);
 });
 
 test('迁移接口合并本机数据', async () => {
@@ -942,6 +949,11 @@ test('迁移接口合并本机数据', async () => {
   const blankWord = await request(app).post('/api/library/import').send({ wordbook: [{ word: '   ' }] });
   assert.equal(blankWord.status, 400);
   assert.match(blankWord.body.error, /word/);
+
+  // null 条目同样要拦（见 PUT /api/wordbook 里的说明）。
+  const nullWord = await request(app).post('/api/library/import').send({ wordbook: [null] });
+  assert.equal(nullWord.status, 400);
+  assert.match(nullWord.body.error, /word/);
 });
 ```
 
@@ -967,7 +979,9 @@ Expected: FAIL — 新增的 2 个 test 返回 404
     const { entries } = req.body ?? {};
     if (!Array.isArray(entries)) return res.status(400).json({ error: 'entries 必须是数组。' });
     const invalid = entries.find((entry) => typeof entry?.word !== 'string' || entry.word.trim().length === 0);
-    if (invalid) return res.status(400).json({ error: '每个单词条目的 word 必须是非空文本。' });
+    // 必须判 `!== undefined`：find() 返回的是「匹配到的那个元素」，元素本身是 null 时是假值，
+    // 写成 `if (invalid)` 会让 [null] 通过校验并落盘，前端渲染单词本时 entry.word 直接抛错。
+    if (invalid !== undefined) return res.status(400).json({ error: '每个单词条目的 word 必须是非空文本。' });
     try {
       return res.json({ ok: true, saved: await store.putWordbook(entries) });
     } catch (error) {
@@ -980,9 +994,9 @@ Expected: FAIL — 新增的 2 个 test 返回 404
     for (const [name, value] of [['articles', articles], ['folders', folders], ['wordbook', wordbook]]) {
       if (!Array.isArray(value)) return res.status(400).json({ error: `${name} 必须是数组。` });
     }
-    // 与 PUT /api/wordbook 同一条规则：空白词形不许进库。
+    // 与 PUT /api/wordbook 同一条规则：空白词形不许进库。同样要判 `!== undefined`（见上）。
     const blankWord = wordbook.find((entry) => typeof entry?.word !== 'string' || entry.word.trim().length === 0);
-    if (blankWord) return res.status(400).json({ error: '每个单词条目的 word 必须是非空文本。' });
+    if (blankWord !== undefined) return res.status(400).json({ error: '每个单词条目的 word 必须是非空文本。' });
     try {
       return res.json({ imported: await store.importAll({ articles, folders, wordbook }) });
     } catch (error) {
