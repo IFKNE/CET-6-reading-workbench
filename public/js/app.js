@@ -1282,6 +1282,9 @@ function toggleHighlight(word) {
 }
 
 function openContextMenu(event, target) {
+  // 长按菜单 z-index 25、卡片 26：两者重叠时菜单会被卡片压住（靠下的词尤其明显），
+  // 长按又不触发 click，冒泡里的「点空白处收起」管不到，所以这里先收起卡片。
+  closeAnnotationSheet();
   state.contextTarget = { word: target.dataset.word, context: target.dataset.context };
   elements.contextMenuWord.textContent = target.dataset.word;
   elements.contextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - 190)}px`;

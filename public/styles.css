@@ -310,9 +310,12 @@ html[data-theme="dark"] .drawer-backdrop { background: rgba(0,0,0,.56); }
     padding-bottom: calc(20px + env(safe-area-inset-bottom));
     transform: translateY(105%);
     visibility: hidden;
-    transition: transform .28s ease;
+    /* 收起时把 visibility 推迟到滑落动画结束再切：只过渡 transform 的话，
+       visibility 会在同一帧变 hidden，卡片是「瞬间消失」而不是滑下去。
+       展开态覆盖成不延迟（见下一条），所以滑出时立刻可见。 */
+    transition: transform .28s ease, visibility 0s linear .28s;
   }
-  .annotation-panel.is-open { transform: translateY(0); visibility: visible; }
+  .annotation-panel.is-open { transform: translateY(0); visibility: visible; transition: transform .28s ease, visibility 0s; }
   /* 打开时画一条把手；收起时不占位置。 */
   .annotation-panel.is-open::before { content: ''; display: block; width: 36px; height: 4px; margin: 0 auto 8px; border-radius: 999px; background: rgba(34, 49, 43, .32); }
   .sheet-chrome { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-bottom: 6px; padding: 4px 0; background: inherit; }
@@ -322,7 +325,9 @@ html[data-theme="dark"] .drawer-backdrop { background: rgba(0,0,0,.56); }
   /* 词元触控热区：行高 1.95 纵向有富余，左右用负外边距抵消，不影响排版。 */
   .word-token { padding: 3px 1px; margin: 0 -1px; touch-action: manipulation; }
   @media (prefers-reduced-motion: reduce) {
-    .annotation-panel { transition: none; }
+    /* 展开态自带 transition，特指度高于 .annotation-panel，必须一起关掉，
+       否则降级动效时滑出仍然有动画（收起反而是瞬时的）。 */
+    .annotation-panel, .annotation-panel.is-open { transition: none; }
   }
   .reader-paper { min-height: auto; }
   .book-shell { box-shadow: 9px 11px 0 rgba(48, 69, 58, .1); }
