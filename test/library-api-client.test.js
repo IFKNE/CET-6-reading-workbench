@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchLibrary, putArticle, subscribeServerStatus, putWordbook } from '../public/js/library-api.js';
+import {
+  deleteArticle,
+  deleteFolder,
+  fetchLibrary,
+  fetchWordbook,
+  importLocalData,
+  putArticle,
+  putFolder,
+  putWordbook,
+  subscribeServerStatus
+} from '../public/js/library-api.js';
 
 // 用 stub 换掉 globalThis.fetch：客户端唯一的副作用就是这个全局函数。
 function withStubFetch(handler, run) {
@@ -78,4 +88,46 @@ test('服务端 500 时抛服务端错误文案，但状态仍是在线', async 
   );
   unsubscribe();
   assert.deepEqual(seen, [true]);
+});
+
+test('其余导出打到正确的地址与方法（含需要转义的 id）', async () => {
+  await withStubFetch(
+    () => new Response(JSON.stringify({ ok: true, folder: { id: 'f/1' }, entries: [] }), { status: 200 }),
+    async (calls) => {
+      await deleteArticle('a/1 号');
+      await putFolder({ id: 'f/1', name: '真题听力' });
+      await deleteFolder('f/1');
+      await fetchWordbook();
+      await importLocalData({ articles: [], folders: [], wordbook: [] });
+      assert.deepEqual(calls.map((call) => [call.options.method ?? 'GET', call.url]), [
+        ['DELETE', '/api/library/articles/a%2F1%20%E5%8F%B7'],
+        ['PUT', '/api/library/folders/f%2F1'],
+        ['DELETE', '/api/library/folders/f%2F1'],
+        ['GET', '/api/wordbook'],
+        ['POST', '/api/library/import']
+      ]);
+    }
+  );
+});
+
+test('请求带 AbortSignal，200 但不是 JSON 时给中文提示', async () => {
+  await withStubFetch(
+    (url, options) => {
+      assert.ok(options.signal instanceof AbortSignal);
+      return new Response('<!doctype html><title>Wi-Fi 登录</title>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+    },
+    async () => {
+      await assert.rejects(() => fetchLibrary(), { message: /无法解析的数据/ });
+    }
+  );
+});
+
+test('连接被中止（超时）时按「未连接」处理并切到离线', async () => {
+  const seen = [];
+  const unsubscribe = subscribeServerStatus((online) => seen.push(online));
+  await withStubFetch(() => { throw new DOMException('Aborted', 'AbortError'); }, async () => {
+    await assert.rejects(() => fetchLibrary(), { message: /未连接到电脑服务器/ });
+  });
+  unsubscribe();
+  assert.deepEqual(seen, [true, false]);
 });
