@@ -226,3 +226,13 @@ test('迁移时 updatedAt 相同则保留服务器版本', async () => {
   assert.equal(result.articles, 0);
   assert.equal((await store.getArticle('a1')).article, 'Server copy.');
 });
+
+test('重复迁移同一份文件夹数据时不计入改动', async () => {
+  const { store } = await createTemporaryStore();
+  const folders = [{ id: 'f1', name: '真题听力', createdAt: '2026-10-11T00:00:00.000Z' }];
+  assert.equal((await store.importAll({ folders })).folders, 1);
+  // 内容没变就不该再报 1，否则调用方永远判断不出「这次没有改动」。
+  assert.equal((await store.importAll({ folders })).folders, 0);
+  // 名字变了才算一次改动。
+  assert.equal((await store.importAll({ folders: [{ ...folders[0], name: '新名字' }] })).folders, 1);
+});

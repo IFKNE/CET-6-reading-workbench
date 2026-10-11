@@ -147,11 +147,17 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
         for (const folder of folders) {
           const record = structuredClone(folder);
           const index = current.folders.findIndex((item) => item.id === folder.id);
-          if (index === -1) current.folders.push(record);
-          else current.folders[index] = record;
-          // 三个计数都是「真正落库的条数」，而不是入参长度：
-          // 否则重复点迁移按钮会永远返回非 0，调用方无法判断这次到底有没有改动。
-          importedFolders += 1;
+          if (index === -1) {
+            current.folders.push(record);
+            importedFolders += 1;
+            continue;
+          }
+          // 内容没变就不写：文件夹没有 updatedAt，无条件 upsert 会让重复迁移永远报非 0，
+          // 调用方就判断不出「这次到底有没有改动」。文章/单词本的计数都是这个含义，三个字段保持一致。
+          if (JSON.stringify(current.folders[index]) !== JSON.stringify(record)) {
+            current.folders[index] = record;
+            importedFolders += 1;
+          }
         }
 
         for (const article of articles) {
