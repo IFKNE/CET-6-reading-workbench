@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addOrUpdateWord, createMarkdown, createWordSummary, filterWords, getWordContextSentence, isWordSaved, resolveStoredWordForm, savedWordKeys, wordKey } from '../public/js/wordbook.js';
+import { addOrUpdateWord, collectWordSources, createMarkdown, createWordSummary, filterWords, findWordEntry, getWordContextSentence, isWordSaved, resolveStoredWordForm, savedWordKeys, wordKey } from '../public/js/wordbook.js';
 
 test('同一词形更新而不是重复收藏', () => {
   const first = addOrUpdateWord([], { word: 'study', meaning: '学习', partOfSpeech: 'v.', context: 'I study every day.', savedAt: '2026-10-05' });
@@ -100,4 +100,62 @@ test('词形归一化统一走 wordKey', () => {
   assert.deepEqual([...savedWordKeys([{ word: '  Evidence ' }])], ['evidence']);
   assert.equal(isWordSaved([{ word: '  Evidence ' }], 'evidence'), true);
   assert.equal(resolveStoredWordForm({ word: '  Run ' }, 'running'), 'run');
+});
+
+test('同一个词在不同文章里累积出现次数与原句，不重复建条目', () => {
+  const first = addOrUpdateWord([], { word: 'critical', meaning: '关键的', context: 'Critical reading matters.', savedAt: '2026-10-09', source: { articleId: 'a1', title: '文章一', count: 2 } });
+  const second = addOrUpdateWord(first, { word: 'Critical', meaning: '关键的', context: 'A critical issue appeared.', savedAt: '2026-10-09', source: { articleId: 'a2', title: '文章二', count: 1 } });
+  assert.equal(second.length, 1);
+  assert.deepEqual(second[0].sources.a1.sentences, ['Critical reading matters.']);
+  assert.deepEqual(second[0].sources.a2.sentences, ['A critical issue appeared.']);
+  assert.equal(second[0].sources.a1.count, 2);
+  assert.equal(second[0].sources.a2.count, 1);
+});
+
+test('同一篇重记只刷新次数、句子不重复', () => {
+  const first = addOrUpdateWord([], { word: 'critical', context: 'Critical reading matters.', source: { articleId: 'a1', title: '文章一', count: 2 } });
+  const second = addOrUpdateWord(first, { word: 'critical', context: 'Critical reading matters.', source: { articleId: 'a1', title: '文章一', count: 5 } });
+  assert.equal(second.length, 1);
+  assert.equal(second[0].sources.a1.count, 5);
+  assert.deepEqual(second[0].sources.a1.sentences, ['Critical reading matters.']);
+});
+
+test('旧条目的来源没有 sentences 字段也能继续重记', () => {
+  const legacy = [{ word: 'critical', sources: { a1: { title: '文章一', count: 2 } } }];
+  const updated = addOrUpdateWord(legacy, { word: 'critical', context: 'A new sentence.', source: { articleId: 'a1', title: '文章一', count: 3 } });
+  assert.equal(updated[0].sources.a1.count, 3);
+  assert.deepEqual(updated[0].sources.a1.sentences, ['A new sentence.']);
+});
+
+test('按词形查找条目', () => {
+  const entries = [{ word: 'critical' }, { word: 'evidence' }];
+  assert.equal(findWordEntry(entries, '  Critical ')?.word, 'critical');
+  assert.equal(findWordEntry(entries, 'missing'), undefined);
+  assert.equal(findWordEntry(null, 'critical'), undefined);
+});
+
+test('来源列表按次数与标题排序并过滤空句', () => {
+  const entry = { sources: {
+    a2: { title: 'β 文章', count: 1, sentences: ['b sentence', '', '   '] },
+    a1: { title: 'α 文章', count: 3 },
+    a3: { title: 'γ 文章', count: 3, sentences: ['c sentence'] }
+  } };
+  const list = collectWordSources(entry);
+  assert.deepEqual(list.map((source) => source.title), ['α 文章', 'γ 文章', 'β 文章']);
+  assert.deepEqual(list[0].sentences, []);
+  assert.deepEqual(list[2].sentences, ['b sentence']);
+});
+
+test('导出的 Markdown 列出每篇来源的原句', () => {
+  const markdown = createMarkdown([{
+    word: 'critical', meaning: '关键的', partOfSpeech: 'adj.', context: 'latest sentence', savedAt: '2026-10-09',
+    sources: {
+      a1: { title: '文章一', count: 2, sentences: ['first sentence'] },
+      a2: { title: '文章二', count: 1, sentences: ['second sentence'] }
+    }
+  }], '2026-10-09');
+  assert.match(markdown, /- 来源：/);
+  assert.match(markdown, /> first sentence/);
+  assert.match(markdown, /> second sentence/);
+  assert.match(markdown, /> latest sentence/);
 });
