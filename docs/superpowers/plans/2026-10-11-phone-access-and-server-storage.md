@@ -667,7 +667,8 @@ test('PUT 文章后能在 GET 里读到，DELETE 之后消失', async () => {
   const app = await createTestApp();
   const put = await request(app).put('/api/library/articles/a1').send(article('a1'));
   assert.equal(put.status, 200);
-  assert.equal(put.body.article.id, 'a1');
+  // 整体比较，防止 title/category/folderId 在往返中被悄悄丢掉。
+  assert.deepEqual(put.body.article, article('a1'));
   assert.equal((await request(app).get('/api/library')).body.articles.length, 1);
 
   const remove = await request(app).delete('/api/library/articles/a1');
@@ -682,11 +683,11 @@ test('PUT 文章校验 id 一致、正文非空且不超长', async () => {
   const app = await createTestApp();
   const mismatch = await request(app).put('/api/library/articles/a1').send(article('a2'));
   assert.equal(mismatch.status, 400);
-  assert.match(mismatch.body.error, /id/);
+  assert.match(mismatch.body.error, /必须与地址里的 id 一致/);
 
   const empty = await request(app).put('/api/library/articles/a1').send(article('a1', { article: '   ' }));
   assert.equal(empty.status, 400);
-  assert.match(empty.body.error, /article/);
+  assert.match(empty.body.error, /非空文本/);
 
   const tooLong = await request(app).put('/api/library/articles/a1').send(article('a1', { article: 'x'.repeat(100001) }));
   assert.equal(tooLong.status, 400);
@@ -703,7 +704,27 @@ test('文件夹可增删，删除时返回解绑篇数', async () => {
   const remove = await request(app).delete('/api/library/folders/f1');
   assert.equal(remove.status, 200);
   assert.deepEqual(remove.body, { ok: true, detached: 1 });
-  assert.equal((await request(app).get('/api/library')).body.articles[0].folderId, '');
+  const after = (await request(app).get('/api/library')).body;
+  assert.equal(after.articles[0].folderId, '');
+  // 文件夹本身确实被删掉了，而不只是文章被解绑。
+  assert.deepEqual(after.folders, []);
+});
+
+test('路径 id 为空白时返回 400，且不改动数据', async () => {
+  const app = await createTestApp();
+  const response = await request(app).delete('/api/library/articles/%20');
+  assert.equal(response.status, 400);
+  assert.match(response.body.error, /id 不能为空/);
+  assert.deepEqual((await request(app).get('/api/library')).body.articles, []);
+});
+
+test('存储层出错时返回 500 并带上原因', async () => {
+  // 注入一个必然失败的 store：验证「校验通过之后才写、写失败要转成 500 文案」这条链路。
+  const failing = { listArticles: async () => { throw new Error('磁盘写入失败。'); }, listFolders: async () => [] };
+  const app = createApp({ translator, store: failing });
+  const response = await request(app).get('/api/library');
+  assert.equal(response.status, 500);
+  assert.equal(response.body.error, '磁盘写入失败。');
 });
 ```
 
@@ -714,7 +735,7 @@ Expected: FAIL — `GET /api/library` 返回 404（拿到的是 `express.static`
 
 - [ ] **Step 3: 实现路由**
 
-修改 `server/app.js`：把文件顶部改成下面这样（新增 `store` 导入与 `createApp` 的默认参数），并在 `/api/wordbook.docx` 路由**之后**、`app.use(express.static(...))` **之前**插入 4 个文章库路由。
+修改 `server/app.js`：把文件顶部改成下面这样（新增 `store` 导入、`statusForError`、`readIdParamOrRespond` 与 `createApp` 的默认参数），并在 `/api/wordbook.docx` 路由**之后**、`app.use(express.static(...))` **之前**插入 5 个文章库路由。
 
 ```js
 import express from 'express';
@@ -723,9 +744,19 @@ import { createWordbookDocument } from './docx-export.js';
 import { createStore } from './store.js';
 
 const validScopes = new Set(['word', 'word-batch', 'phrase', 'sentence', 'paragraph', 'question', 'prestudy']);
+const MAX_ARTICLE_LENGTH = 100000;
 
-// id 取自路径：为空直接 400，并让调用方知道响应已经写过。
-function readIdParam(req, res) {
+// 全文件唯一的「异常 → 状态码」规则，别让每个 handler 各写一套：
+// 带 statusCode 的（翻译上游错误）用自己的；存储层参数类型错误算 400；其余算服务端故障。
+function statusForError(error, fallback) {
+  if (error.statusCode) return error.statusCode;
+  if (error instanceof TypeError) return 400;
+  return fallback;
+}
+
+// 名字里写明 OrRespond：它失败时自己就把 400 写进响应了，
+// 所以调用点必须立刻 return —— 叫 readIdParam 会让人以为它只是取值。
+function readIdParamOrRespond(req, res) {
   const id = String(req.params.id ?? '').trim();
   if (!id) {
     res.status(400).json({ error: 'id 不能为空。' });
@@ -739,45 +770,47 @@ export function createApp({ translator, store = createStore() }) {
   app.use(express.json({ limit: '2mb' }));
 ```
 
+同一处顺手把 `/api/translate` 的 `res.status(error.statusCode ?? 502)` 改成 `res.status(statusForError(error, 502))`：行为完全不变（有 statusCode 的仍用它，没有的仍回落到 502），只是让整个文件共用一条规则。
+
 ```js
   app.get('/api/library', async (req, res) => {
     try {
       const [articles, folders] = await Promise.all([store.listArticles(), store.listFolders()]);
       return res.json({ articles, folders });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '文章库读取失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '文章库读取失败。' });
     }
   });
 
   app.put('/api/library/articles/:id', async (req, res) => {
-    const id = readIdParam(req, res);
+    const id = readIdParamOrRespond(req, res);
     if (!id) return;
     const article = req.body ?? {};
     if (article.id !== id) return res.status(400).json({ error: 'body.id 必须与地址里的 id 一致。' });
     if (typeof article.article !== 'string' || article.article.trim().length === 0) {
       return res.status(400).json({ error: 'article 必须是非空文本。' });
     }
-    if (article.article.length > 100000) return res.status(400).json({ error: 'article 不能超过 100000 个字符。' });
+    if (article.article.length > MAX_ARTICLE_LENGTH) return res.status(400).json({ error: `article 不能超过 ${MAX_ARTICLE_LENGTH} 个字符。` });
     try {
       return res.json({ article: await store.putArticle(article) });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '文章保存失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '文章保存失败。' });
     }
   });
 
   app.delete('/api/library/articles/:id', async (req, res) => {
-    const id = readIdParam(req, res);
+    const id = readIdParamOrRespond(req, res);
     if (!id) return;
     try {
       const { removed } = await store.deleteArticle(id);
       return res.json({ ok: true, removed });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '文章删除失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '文章删除失败。' });
     }
   });
 
   app.put('/api/library/folders/:id', async (req, res) => {
-    const id = readIdParam(req, res);
+    const id = readIdParamOrRespond(req, res);
     if (!id) return;
     const folder = req.body ?? {};
     if (folder.id !== id) return res.status(400).json({ error: 'body.id 必须与地址里的 id 一致。' });
@@ -787,18 +820,18 @@ export function createApp({ translator, store = createStore() }) {
     try {
       return res.json({ folder: await store.putFolder(folder) });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '文件夹保存失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '文件夹保存失败。' });
     }
   });
 
   app.delete('/api/library/folders/:id', async (req, res) => {
-    const id = readIdParam(req, res);
+    const id = readIdParamOrRespond(req, res);
     if (!id) return;
     try {
       const { detached } = await store.deleteFolder(id);
       return res.json({ ok: true, detached });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '文件夹删除失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '文件夹删除失败。' });
     }
   });
 ```
@@ -806,7 +839,7 @@ export function createApp({ translator, store = createStore() }) {
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `node --test test/library-api.test.js`
-Expected: PASS（4 个 test 全绿）
+Expected: PASS（6 个 test 全绿）
 
 - [ ] **Step 5: 全量回归 + 提交**
 
@@ -900,7 +933,7 @@ Expected: FAIL — 新增的 2 个 test 返回 404
     try {
       return res.json({ ok: true, saved: await store.putWordbook(entries) });
     } catch (error) {
-      return res.status(error instanceof TypeError ? 400 : 500).json({ error: error.message || '单词本保存失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '单词本保存失败。' });
     }
   });
 
@@ -915,9 +948,9 @@ Expected: FAIL — 新增的 2 个 test 返回 404
     try {
       return res.json({ imported: await store.importAll({ articles, folders, wordbook }) });
     } catch (error) {
-      // 存储层的类型守卫抛的是 TypeError，那是「参数不合法」而不是「服务出错」，
-      // 直接映射成 400，别让客户端收到一个带 400 文案的 500。
-      return res.status(error instanceof TypeError ? 400 : 500).json({ error: error.message || '数据迁移失败。' });
+      // 存储层的类型守卫抛的是 TypeError，statusForError 会把它算成 400（参数不合法），
+      // 别让客户端收到一个带 400 文案的 500。
+      return res.status(statusForError(error, 500)).json({ error: error.message || '数据迁移失败。' });
     }
   });
 ```
