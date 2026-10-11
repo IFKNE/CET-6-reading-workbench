@@ -127,6 +127,43 @@ export function createApp({ translator, store = createStore() }) {
     }
   });
 
+  app.get('/api/wordbook', async (req, res) => {
+    try {
+      return res.json({ entries: await store.getWordbook() });
+    } catch (error) {
+      return res.status(statusForError(error, 500)).json({ error: error.message || '单词本读取失败。' });
+    }
+  });
+
+  app.put('/api/wordbook', async (req, res) => {
+    const { entries } = req.body ?? {};
+    if (!Array.isArray(entries)) return res.status(400).json({ error: 'entries 必须是数组。' });
+    const invalid = entries.find((entry) => typeof entry?.word !== 'string' || entry.word.trim().length === 0);
+    if (invalid) return res.status(400).json({ error: '每个单词条目的 word 必须是非空文本。' });
+    try {
+      return res.json({ ok: true, saved: await store.putWordbook(entries) });
+    } catch (error) {
+      return res.status(statusForError(error, 500)).json({ error: error.message || '单词本保存失败。' });
+    }
+  });
+
+  app.post('/api/library/import', async (req, res) => {
+    const { articles = [], folders = [], wordbook = [] } = req.body ?? {};
+    for (const [name, value] of [['articles', articles], ['folders', folders], ['wordbook', wordbook]]) {
+      if (!Array.isArray(value)) return res.status(400).json({ error: `${name} 必须是数组。` });
+    }
+    // 与 PUT /api/wordbook 同一条规则：空白词形不许进库。
+    const blankWord = wordbook.find((entry) => typeof entry?.word !== 'string' || entry.word.trim().length === 0);
+    if (blankWord) return res.status(400).json({ error: '每个单词条目的 word 必须是非空文本。' });
+    try {
+      return res.json({ imported: await store.importAll({ articles, folders, wordbook }) });
+    } catch (error) {
+      // 存储层参数守卫挂的是 statusCode = 400，statusForError 会据此回 400，
+      // 别让客户端收到一个带 400 文案的 500。
+      return res.status(statusForError(error, 500)).json({ error: error.message || '数据迁移失败。' });
+    }
+  });
+
   app.use(express.static(path.join(process.cwd(), 'public')));
   return app;
 }

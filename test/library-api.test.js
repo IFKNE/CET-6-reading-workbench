@@ -100,3 +100,45 @@ test('存储层出错时按错误自带的状态码返回', async () => {
   assert.equal(rejected.status, 400);
   assert.equal(rejected.body.error, '参数不合法。');
 });
+
+test('单词本 GET / PUT 往返，并校验条目', async () => {
+  const app = await createTestApp();
+  assert.deepEqual((await request(app).get('/api/wordbook')).body, { entries: [] });
+
+  const put = await request(app).put('/api/wordbook').send({ entries: [{ word: 'hello', meaning: '你好' }] });
+  assert.equal(put.status, 200);
+  assert.equal(put.body.saved, 1);
+  assert.deepEqual((await request(app).get('/api/wordbook')).body.entries, [{ word: 'hello', meaning: '你好' }]);
+
+  const notArray = await request(app).put('/api/wordbook').send({ entries: 'hello' });
+  assert.equal(notArray.status, 400);
+  assert.match(notArray.body.error, /entries/);
+
+  const badEntry = await request(app).put('/api/wordbook').send({ entries: [{ meaning: '没有词形' }] });
+  assert.equal(badEntry.status, 400);
+  assert.match(badEntry.body.error, /word/);
+});
+
+test('迁移接口合并本机数据', async () => {
+  const app = await createTestApp();
+  const response = await request(app).post('/api/library/import').send({
+    articles: [article('a1')],
+    folders: [{ id: 'f1', name: '真题听力', createdAt: '2026-10-11T00:00:00.000Z' }],
+    wordbook: [{ word: 'hello', meaning: '你好' }]
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.imported, { articles: 1, folders: 1, wordbook: 1 });
+
+  const again = await request(app).post('/api/library/import').send({ articles: [article('a1')], folders: [], wordbook: [{ word: 'hello' }] });
+  assert.deepEqual(again.body.imported, { articles: 0, folders: 0, wordbook: 0 });
+
+  const bad = await request(app).post('/api/library/import').send({ articles: 'nope' });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /articles/);
+
+  // 迁移路径要和 PUT /api/wordbook 守同一条规则：空白词形不许进库，
+  // 否则单词本里会多出看不见却删不掉的空条目（Task 3 复核指出过这个缺口）。
+  const blankWord = await request(app).post('/api/library/import').send({ wordbook: [{ word: '   ' }] });
+  assert.equal(blankWord.status, 400);
+  assert.match(blankWord.body.error, /word/);
+});
