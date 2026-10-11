@@ -6,6 +6,27 @@ function emptyDocument() {
   return { version: 1, articles: [], folders: [], wordbook: [] };
 }
 
+// 形状不对时与 JSON 语法错误同等处理：宁可服务报错，也不让一份半截文件变成空库。
+function corrupt(filePath, detail, cause) {
+  const suffix = detail ? `（${detail}）` : '';
+  return new Error(`文章库文件无法解析：${filePath}${suffix}。请先备份该文件，再修复或删除它后重启服务。`, { cause });
+}
+
+function normalizeDocument(parsed, filePath) {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw corrupt(filePath, '根节点必须是对象');
+  }
+  if (parsed.version !== undefined && parsed.version !== 1) {
+    throw corrupt(filePath, `不支持的文档版本 ${String(parsed.version)}`);
+  }
+  for (const field of ['articles', 'folders', 'wordbook']) {
+    if (parsed[field] !== undefined && !Array.isArray(parsed[field])) {
+      throw corrupt(filePath, `${field} 必须是数组`);
+    }
+  }
+  return { ...emptyDocument(), articles: parsed.articles ?? [], folders: parsed.folders ?? [], wordbook: parsed.wordbook ?? [] };
+}
+
 export function createStore({ dataDir = process.env.DATA_DIR || './data', now = () => new Date().toISOString() } = {}) {
   const filePath = path.join(dataDir, 'library.json');
   let document = null;
@@ -14,40 +35,31 @@ export function createStore({ dataDir = process.env.DATA_DIR || './data', now = 
   async function load() {
     if (document) return document;
     try {
-      const raw = await fs.readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      document = {
-        version: 1,
-        articles: Array.isArray(parsed?.articles) ? parsed.articles : [],
-        folders: Array.isArray(parsed?.folders) ? parsed.folders : [],
-        wordbook: Array.isArray(parsed?.wordbook) ? parsed.wordbook : []
-      };
+      document = normalizeDocument(JSON.parse(await fs.readFile(filePath, 'utf8')), filePath);
     } catch (error) {
-      if (error.code === 'ENOENT') {
-        document = emptyDocument();
-      } else if (error instanceof SyntaxError) {
-        // 数据安全优先：宁可服务报错，也用空文档覆盖用户已有数据这种事绝不发生。
-        throw new Error(`文章库文件无法解析：${filePath}。请先备份该文件，再修复或删除它后重启服务。`);
-      } else {
-        throw error;
-      }
+      if (error.code === 'ENOENT') document = emptyDocument();
+      else if (error instanceof SyntaxError) throw corrupt(filePath, error.message, error);
+      else throw error;
     }
     return document;
   }
 
-  async function persist() {
+  async function persist(target) {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     const temporaryPath = `${filePath}.tmp`;
-    await fs.writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
+    await fs.writeFile(temporaryPath, `${JSON.stringify(target, null, 2)}\n`, 'utf8');
     await fs.rename(temporaryPath, filePath);
   }
 
-  // 所有写操作串行化：前一次失败也不能让后面的写入卡在 rejected 的 Promise 上。
+  // 写操作串行化，并且「先写副本、落盘成功后才推进内存」：
+  // 若先改内存再落盘，一旦落盘失败，内存就领先于磁盘——调用方收到的是失败，
+  // 而后续任何一次成功写入都会把这次被判定失败的改动悄悄带上盘。
   function mutate(action) {
     const next = writeChain.catch(() => {}).then(async () => {
-      const current = await load();
-      const result = action(current);
-      await persist();
+      const draft = structuredClone(await load());
+      const result = action(draft);
+      await persist(draft);
+      document = draft;
       return result;
     });
     writeChain = next;
