@@ -4,9 +4,19 @@ import { createWordbookDocument } from './docx-export.js';
 import { createStore } from './store.js';
 
 const validScopes = new Set(['word', 'word-batch', 'phrase', 'sentence', 'paragraph', 'question', 'prestudy']);
+const MAX_ARTICLE_LENGTH = 100000;
 
-// id 取自路径：为空直接 400，并让调用方知道响应已经写过。
-function readIdParam(req, res) {
+// 全文件唯一的「异常 → 状态码」规则，别让每个 handler 各写一套：
+// 带 statusCode 的（翻译上游错误）用自己的；存储层参数类型错误算 400；其余算服务端故障。
+function statusForError(error, fallback) {
+  if (error.statusCode) return error.statusCode;
+  if (error instanceof TypeError) return 400;
+  return fallback;
+}
+
+// 名字里写明 OrRespond：它失败时自己就把 400 写进响应了，
+// 所以调用点必须立刻 return —— 叫 readIdParam 会让人以为它只是取值。
+function readIdParamOrRespond(req, res) {
   const id = String(req.params.id ?? '').trim();
   if (!id) {
     res.status(400).json({ error: 'id 不能为空。' });
@@ -39,7 +49,7 @@ export function createApp({ translator, store = createStore() }) {
       });
       return res.json(result);
     } catch (error) {
-      return res.status(error.statusCode ?? 502).json({ error: error.message || '翻译服务暂时不可用。' });
+      return res.status(statusForError(error, 502)).json({ error: error.message || '翻译服务暂时不可用。' });
     }
   });
 
@@ -60,39 +70,39 @@ export function createApp({ translator, store = createStore() }) {
       const [articles, folders] = await Promise.all([store.listArticles(), store.listFolders()]);
       return res.json({ articles, folders });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '文章库读取失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '文章库读取失败。' });
     }
   });
 
   app.put('/api/library/articles/:id', async (req, res) => {
-    const id = readIdParam(req, res);
+    const id = readIdParamOrRespond(req, res);
     if (!id) return;
     const article = req.body ?? {};
     if (article.id !== id) return res.status(400).json({ error: 'body.id 必须与地址里的 id 一致。' });
     if (typeof article.article !== 'string' || article.article.trim().length === 0) {
       return res.status(400).json({ error: 'article 必须是非空文本。' });
     }
-    if (article.article.length > 100000) return res.status(400).json({ error: 'article 不能超过 100000 个字符。' });
+    if (article.article.length > MAX_ARTICLE_LENGTH) return res.status(400).json({ error: `article 不能超过 ${MAX_ARTICLE_LENGTH} 个字符。` });
     try {
       return res.json({ article: await store.putArticle(article) });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '文章保存失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '文章保存失败。' });
     }
   });
 
   app.delete('/api/library/articles/:id', async (req, res) => {
-    const id = readIdParam(req, res);
+    const id = readIdParamOrRespond(req, res);
     if (!id) return;
     try {
       const { removed } = await store.deleteArticle(id);
       return res.json({ ok: true, removed });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '文章删除失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '文章删除失败。' });
     }
   });
 
   app.put('/api/library/folders/:id', async (req, res) => {
-    const id = readIdParam(req, res);
+    const id = readIdParamOrRespond(req, res);
     if (!id) return;
     const folder = req.body ?? {};
     if (folder.id !== id) return res.status(400).json({ error: 'body.id 必须与地址里的 id 一致。' });
@@ -102,18 +112,18 @@ export function createApp({ translator, store = createStore() }) {
     try {
       return res.json({ folder: await store.putFolder(folder) });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '文件夹保存失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '文件夹保存失败。' });
     }
   });
 
   app.delete('/api/library/folders/:id', async (req, res) => {
-    const id = readIdParam(req, res);
+    const id = readIdParamOrRespond(req, res);
     if (!id) return;
     try {
       const { detached } = await store.deleteFolder(id);
       return res.json({ ok: true, detached });
     } catch (error) {
-      return res.status(500).json({ error: error.message || '文件夹删除失败。' });
+      return res.status(statusForError(error, 500)).json({ error: error.message || '文件夹删除失败。' });
     }
   });
 
