@@ -1,3 +1,7 @@
+// 每篇来源保留的原句上限：听力原文一句一段，反复在不同句子里收录同一个词会让这个数组无限增长，
+// 而整个单词本会被整份写进 data/library.json、也会被导出。超出时丢最早的，保留最近的上下文。
+export const MAX_SENTENCES_PER_SOURCE = 10;
+
 export function addOrUpdateWord(entries, entry) {
   const key = entry.word.toLowerCase();
   const existing = entries.find((item) => item.word.toLowerCase() === key);
@@ -13,9 +17,10 @@ export function addOrUpdateWord(entries, entry) {
     if (sentence && !sentences.includes(sentence)) sentences.push(sentence);
     sources[entry.source.articleId] = {
       title: entry.source.title || previous.title || '未命名精读文章',
+      // count 是累计出现次数，不因为原句被截断而变小。
       count: entry.source.count ?? previous.count ?? 0,
       recordedAt: new Date().toISOString(),
-      sentences
+      sentences: sentences.slice(-MAX_SENTENCES_PER_SOURCE)
     };
   }
   return [{ ...existing, ...entry, word: key, sources }, ...next];

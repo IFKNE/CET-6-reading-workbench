@@ -9,6 +9,29 @@ test('同一词形更新而不是重复收藏', () => {
   assert.equal(second[0].meaning, '研究');
 });
 
+test('同一篇来源的原句最多保留最近 10 句，出现次数不受影响', () => {
+  // 听力原文一句一段，反复在不同句子里收录同一个词会让这个数组无限增长：
+  // 它会被整份写进 data/library.json、也会被导出，所以写入时就要截断。
+  let entries = [];
+  for (let index = 0; index < 12; index += 1) {
+    entries = addOrUpdateWord(entries, {
+      word: 'abandon',
+      meaning: '放弃',
+      partOfSpeech: 'v.',
+      context: `Sentence ${index}.`,
+      savedAt: '2026-10-11',
+      source: { articleId: 'a1', title: '听力原文', count: index + 1 }
+    });
+  }
+  const sentences = entries[0].sources.a1.sentences;
+  assert.equal(sentences.length, 10);
+  // 丢掉最早的两句，保留最近十句。
+  assert.equal(sentences[0], 'Sentence 2.');
+  assert.equal(sentences.at(-1), 'Sentence 11.');
+  // 出现次数是累计值，不因为原句被截断而变小。
+  assert.equal(entries[0].sources.a1.count, 12);
+});
+
 test('导出的 Markdown 包含词义和原句', () => {
   const markdown = createMarkdown([{ word: 'study', meaning: '学习', partOfSpeech: 'v.', context: 'I study every day.', savedAt: '2026-10-05' }], '2026-10-05');
   assert.match(markdown, /## study/);
