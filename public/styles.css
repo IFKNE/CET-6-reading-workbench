@@ -116,6 +116,10 @@ html[data-theme="dark"] .theme-toggle { background: rgba(255,255,255,.06); }
 .word-source-item strong { display: block; color: var(--green-dark); font: 700 14px var(--serif); }
 .word-source-count { color: var(--ink-soft); font-size: 11px; }
 .word-source-sentences { margin: 7px 0 0; padding-left: 16px; color: var(--ink-soft); font-size: 12px; line-height: 1.6; }
+/* 折叠：来源句子默认只显示最新两句，避免听力原文那种来源把整屏铺满。 */
+.word-source-rest { display: grid; gap: 10px; }
+.word-source-more { justify-self: start; border: 0; padding: 5px 0; color: var(--green-dark); background: transparent; font: 700 11px var(--sans); letter-spacing: .06em; text-decoration: underline; text-underline-offset: 4px; }
+.word-source-more:hover { color: var(--green); }
 html[data-theme="dark"] .word-source-item { background: rgba(255,255,255,.045); }
 .reading-layout { width: min(1280px, calc(100% - 48px)); margin: auto; display: grid; grid-template-columns: minmax(0, 1fr) 355px; align-items: start; gap: clamp(28px, 5vw, 75px); }
 .book-shell { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 3px 10px 10px 3px; background: linear-gradient(90deg, rgba(25,40,34,.15), transparent 4%, transparent 96%, rgba(25,40,34,.08)), var(--paper-deep); box-shadow: 18px 20px 0 rgba(48, 69, 58, .10), inset 15px 0 22px rgba(26,36,30,.07); }

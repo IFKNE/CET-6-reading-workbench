@@ -1182,6 +1182,39 @@ function renderWordbook() {
   }
 }
 
+// 来源块的显示上限：听力原文一句一段，同一个词在不同句里各记一条，
+// 原来把每篇的每一句都铺出来，来源一多就撑满整屏（用户实测反馈）。
+// 这里只折叠**显示**，数据一条不改，导出（Markdown / Word）仍然是完整的。
+const VISIBLE_SOURCES = 3;
+const VISIBLE_SENTENCES = 2;
+
+function renderWordSourceItem(source) {
+  const item = createElement('div', 'word-source-item', [
+    createElement('strong', '', source.title),
+    createElement('span', 'word-source-count', `${source.count} 次`)
+  ]);
+  if (!source.sentences.length) return item;
+
+  // 最新记下的排在最前：复习时最想看到的是刚记这一句的上下文。
+  const ordered = [...source.sentences].reverse();
+  item.append(createElement('ul', 'word-source-sentences', ordered.slice(0, VISIBLE_SENTENCES).map((sentence) => createElement('li', '', sentence))));
+
+  const restSentences = ordered.slice(VISIBLE_SENTENCES);
+  if (restSentences.length) {
+    const rest = createElement('ul', 'word-source-sentences');
+    rest.hidden = true;
+    rest.append(...restSentences.map((sentence) => createElement('li', '', sentence)));
+    const more = createElement('button', 'word-source-more', `还有 ${restSentences.length} 句`);
+    more.type = 'button';
+    more.addEventListener('click', () => {
+      rest.hidden = !rest.hidden;
+      more.textContent = rest.hidden ? `还有 ${restSentences.length} 句` : '收起其余原句';
+    });
+    item.append(rest, more);
+  }
+  return item;
+}
+
 function renderWordSourceList(entry) {
   const block = createElement('div', 'word-source-list');
   const sources = collectWordSources(entry);
@@ -1191,16 +1224,21 @@ function renderWordSourceList(entry) {
   }
   const total = sources.reduce((sum, source) => sum + source.count, 0);
   block.append(createElement('p', 'word-sources', `共 ${sources.length} 篇来源 · 出现 ${total} 次`));
-  sources.forEach((source) => {
-    const item = createElement('div', 'word-source-item', [
-      createElement('strong', '', source.title),
-      createElement('span', 'word-source-count', `${source.count} 次`)
-    ]);
-    if (source.sentences.length) {
-      item.append(createElement('ul', 'word-source-sentences', source.sentences.map((sentence) => createElement('li', '', sentence))));
-    }
-    block.append(item);
-  });
+  sources.slice(0, VISIBLE_SOURCES).forEach((source) => block.append(renderWordSourceItem(source)));
+
+  const restSources = sources.slice(VISIBLE_SOURCES);
+  if (restSources.length) {
+    const rest = createElement('div', 'word-source-rest');
+    rest.hidden = true;
+    restSources.forEach((source) => rest.append(renderWordSourceItem(source)));
+    const more = createElement('button', 'word-source-more', `还有 ${restSources.length} 篇来源`);
+    more.type = 'button';
+    more.addEventListener('click', () => {
+      rest.hidden = !rest.hidden;
+      more.textContent = rest.hidden ? `还有 ${restSources.length} 篇来源` : '收起其余来源';
+    });
+    block.append(rest, more);
+  }
   return block;
 }
 
