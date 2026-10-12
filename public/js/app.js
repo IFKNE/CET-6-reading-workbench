@@ -539,7 +539,9 @@ async function openSavedArticle(id) {
   state.articleKey = createArticleKey(state.article);
   state.prestudy.articleKey = state.articleKey;
   elements.articleInput.value = state.article;
-  elements.articleCategory.value = ['短篇阅读', '长篇阅读', '听力原文'].includes(state.category) ? state.category : 'custom';
+  // 这里的名单必须与 #article-category 的 <option> 完全一致：
+  // 漏一个，那种分类的文章重新打开时会被当成「自定义分类…」。
+  elements.articleCategory.value = ['短篇阅读', '长篇阅读', '选词填空', '听力原文'].includes(state.category) ? state.category : 'custom';
   elements.customCategory.hidden = elements.articleCategory.value !== 'custom';
   elements.customCategory.value = elements.articleCategory.value === 'custom' ? state.category : '';
   const folders = await listFolders();
